@@ -25,6 +25,8 @@ enum Action {
     Attach(String, Vec<PathBuf>),
     PickedFolder(PathBuf),
     Preview(PathBuf),
+    Screenshot(String),
+    Error(String),
 }
 struct Form {
     name: String,
@@ -314,7 +316,9 @@ impl App {
                     self.maximized = None;
                     self.changed();
                 }
-                Action::Attach(id, paths) => self.attach(&id, paths),
+                Action::Attach(id, paths) => self.attach(&id, paths,ctx),
+                Action::Error(error)=>self.error=Some(error),
+                Action::Screenshot(id)=>{let tx=self.tx.clone();let ctx=ctx.clone();std::thread::spawn(move||{let result=Store::user().and_then(|store|media::clipboard_image(&store.directory));let action=match result{Ok(path)=>Action::Attach(id,vec![path]),Err(e)=>Action::Error(format!("{e:#}"))};let _=tx.send(action);ctx.request_repaint();});},
                 Action::PickedFolder(path) => {
                     if let Some(form) = self.form.as_mut() {
                         form.folder = path.to_string_lossy().into()
@@ -329,17 +333,14 @@ impl App {
             }
         }
     }
-    fn attach(&mut self, id: &str, paths: Vec<PathBuf>) {
+    fn attach(&mut self, id: &str, paths: Vec<PathBuf>,ctx:&egui::Context) {
         let Some(def) = self.definition(id).cloned() else {
             return;
         };
         if def.tool == Tool::OpenCode {
             if let Some(chat) = def.chat {
-                for path in paths {
-                    if let Err(e) = self.runtime.bridge.stage(&chat, &path) {
-                        self.error = Some(format!("Could not stage {}: {e:#}", path.display()));
-                    }
-                }
+                let bridge=self.runtime.bridge.clone();let tx=self.tx.clone();let ctx=ctx.clone();
+                std::thread::spawn(move||{for path in paths{if let Err(e)=bridge.stage(&chat,&path){let _=tx.send(Action::Error(format!("Could not stage {}: {e:#}",path.display())));}}ctx.request_repaint();});
             } else {
                 self.error = Some(
                     "OpenCode is not connected yet. Wait for it to start and try again.".into(),
@@ -392,6 +393,7 @@ impl App {
                     self.picker(Some(id.into()), true, ui.ctx());
                     ui.close();
                 }
+                if ui.button("Paste screenshot · Ctrl+Shift+I").clicked(){self.actions.push(Action::Screenshot(id.into()));ui.close();}
                 ui.weak("Inserts references without sending");
             });
         });
@@ -525,6 +527,7 @@ impl App {
         });
     }
     fn image(&mut self, ui: &mut egui::Ui, path: &PathBuf) {
+        if !self.images.contains_key(path)&&!self.image_errors.contains_key(path)&&self.loading.insert(path.clone()){self.media.request(path,ui.ctx());}
         if let Some(image) = self.images.get_mut(path) {
             ui.horizontal(|ui| {
                 if ui.button("Fit").clicked() {
@@ -711,10 +714,9 @@ impl eframe::App for App {
                         },
                     );
                 }
-                Err(error) => {
-                    for path in self.loading.drain() {
-                        self.image_errors.insert(path, error.clone());
-                    }
+                Err((path,error)) => {
+                    self.loading.remove(&path);
+                    self.image_errors.insert(path,error);
                 }
             }
         }
@@ -735,6 +737,7 @@ impl eframe::App for App {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Comma)) {
             self.actions.push(Action::Focus(Pane::Settings));
         }
+        if ctx.input_mut(|i|i.consume_key(egui::Modifiers::CTRL|egui::Modifiers::SHIFT,egui::Key::I)){if let Some(id)=self.focus.clone(){self.actions.push(Action::Screenshot(id));}}
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.maximized = None;
         }
@@ -973,3 +976,4 @@ fn style(ctx: &egui::Context) {
     style.spacing.window_margin = egui::Margin::same(20);
     ctx.set_style_of(egui::Theme::Dark, style);
 }
+

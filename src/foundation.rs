@@ -115,7 +115,7 @@ impl eframe::App for Foundation {
                         Default::default(),
                     ));
                 }
-                Err(error) => self.error = Some(error),
+                Err((_path,error)) => self.error = Some(error),
             }
         }
         ui.heading("Terminal Workspace · foundation gate");
