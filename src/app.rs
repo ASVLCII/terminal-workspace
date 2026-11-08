@@ -1,3 +1,4 @@
+mod chrome;
 use eframe::egui::{self, Color32, RichText};
 use egui_dock::{DockArea, DockState, TabViewer};
 use std::{
@@ -27,14 +28,20 @@ enum Action {
     WorkspaceReady(String, String, PathBuf),
     FormError(String, String),
     Preview(PathBuf),
+    LocateImage(PathBuf),
+    ImageLocated(PathBuf, PathBuf),
     Screenshot(String),
     Error(String),
     History(Option<String>),
     Resume(terminal_workspace::history::Chat),
+    LocateWorkspace(String),
+    WorkspaceMoved(String, PathBuf),
+    EditCommand(String),
 }
 struct Form {
     id: String,
     validating: bool,
+    start: Tool,
     name: String,
     folder: String,
     command: String,
@@ -45,6 +52,7 @@ struct Preview {
     texture: egui::TextureHandle,
     zoom: f32,
     fit: bool,
+    pan: egui::Vec2,
 }
 #[derive(Default)]
 struct History {
@@ -61,6 +69,7 @@ pub struct App {
     runtime: Manager,
     dirty: Option<Instant>,
     load_error: bool,
+    save_failed: bool,
     actions: Vec<Action>,
     tx: mpsc::Sender<Action>,
     rx: mpsc::Receiver<Action>,
@@ -69,13 +78,22 @@ pub struct App {
     starting: HashSet<String>,
     failures: HashMap<String, String>,
     focus: Option<String>,
-    focus_request:Option<String>,
-    terminal_widgets:HashMap<String,egui::Id>,
+    focus_request: Option<String>,
+    terminal_widgets: HashMap<String, egui::Id>,
     maximized: Option<Pane>,
     media: media::Loader,
     images: HashMap<PathBuf, Preview>,
     loading: HashSet<PathBuf>,
     image_errors: HashMap<PathBuf, String>,
+    navigation_search: String,
+    project_expansion: HashMap<String, bool>,
+    workspace_expansion: HashMap<String, bool>,
+    sidebar_width: f32,
+    history_selected: Option<terminal_workspace::history::Chat>,
+    font_loader: crate::fonts::Loader,
+    font_choices: Vec<crate::fonts::Choice>,
+    font_actual: String,
+    font_error: Option<String>,
     close: bool,
     remember: bool,
     closing: bool,
@@ -91,6 +109,9 @@ pub struct App {
     explicit_quit: bool,
     save_gate: terminal_workspace::closing::SaveGate,
     saved_action: Option<terminal_workspace::closing::Choice>,
+    pending_stop_save: bool,
+    final_exit_save: bool,
+    discard_on_exit: bool,
     shutdown_waiting: bool,
     shutdown_started: Option<Instant>,
     global_pane: Option<Pane>,
@@ -104,7 +125,6 @@ impl App {
         instance: terminal_workspace::instance::Instance,
     ) -> anyhow::Result<Self> {
         style(&cc.egui_ctx);
-        crate::fonts::install(&cc.egui_ctx);
         let store = Store::user()?;
         let (saved, load_error, error) = match store.load() {
             Ok((s, recovered)) => (
@@ -122,6 +142,8 @@ impl App {
                 )),
             ),
         };
+        let font_loader =
+            crate::fonts::Loader::start(cc.egui_ctx.clone(), saved.settings.font_family.clone());
         let writer = Writer::start(store.directory, cc.egui_ctx.clone());
         let plugin = std::env::current_exe()?.parent().unwrap().join("plugin");
         let plugin = if plugin.is_dir() {
@@ -143,6 +165,7 @@ impl App {
             runtime,
             dirty: None,
             load_error,
+            save_failed: false,
             actions: Vec::new(),
             tx,
             rx,
@@ -151,12 +174,22 @@ impl App {
             starting: HashSet::new(),
             failures: HashMap::new(),
             focus: None,
-            focus_request:None,terminal_widgets:HashMap::new(),
+            focus_request: None,
+            terminal_widgets: HashMap::new(),
             maximized: None,
             media: Default::default(),
             images: HashMap::new(),
             loading: HashSet::new(),
             image_errors: HashMap::new(),
+            navigation_search: String::new(),
+            project_expansion: HashMap::new(),
+            workspace_expansion: HashMap::new(),
+            sidebar_width: 272.,
+            history_selected: None,
+            font_loader,
+            font_choices: Vec::new(),
+            font_actual: "Loading font…".into(),
+            font_error: None,
             close: false,
             remember: false,
             closing: false,
@@ -172,6 +205,9 @@ impl App {
             explicit_quit: false,
             save_gate: Default::default(),
             saved_action: None,
+            pending_stop_save: false,
+            final_exit_save: false,
+            discard_on_exit: false,
             shutdown_waiting: false,
             shutdown_started: None,
             global_pane: None,
@@ -210,7 +246,7 @@ impl App {
     fn choose_close(&mut self, choice: terminal_workspace::closing::Choice, ctx: &egui::Context) {
         use terminal_workspace::closing::{self, Choice};
         if choice == Choice::Cancel {
-            self.focus_request=self.focus.clone();
+            self.focus_request = self.focus.clone();
             self.close = false;
             self.remember = false;
             self.explicit_quit = false;
@@ -221,7 +257,7 @@ impl App {
             return;
         }
         if self.load_error {
-            self.error=Some("Saved state could not be loaded safely. Existing files are preserved. Resolve the data error before closing, or close this window through Windows if you accept losing this run’s changes.".into());
+            self.error=Some("Saved state could not be loaded safely. Existing files are preserved. Return to the app to resolve the error, or choose Close without saving to stop this run and keep the existing files.".into());
             return;
         }
         if !self.explicit_quit {
@@ -229,9 +265,23 @@ impl App {
                 closing::preference(self.saved.settings.closing, choice, self.remember);
         }
         self.close = false;
+        self.close_seen = false;
         self.remember = false;
-        if choice==Choice::Background{self.focus_request=self.focus.clone();}
+        if choice == Choice::Background {
+            self.focus_request = self.focus.clone();
+        }
         self.saved_action = Some(choice);
+        if choice == Choice::Stop {
+            self.form = None;
+            self.resume_question = None;
+            self.terminal_question = None;
+        }
+        if choice == Choice::Stop && !self.starting.is_empty() {
+            self.pending_stop_save = true;
+            self.dirty = None;
+            ctx.request_repaint();
+            return;
+        }
         let generation = self.writer.save(self.saved.clone());
         self.save_gate.wait(generation);
         self.dirty = None;
@@ -239,6 +289,15 @@ impl App {
     }
     fn close_ui(&mut self, ctx: &egui::Context) {
         use terminal_workspace::closing::Choice;
+        if self.pending_stop_save {
+            egui::Modal::new(egui::Id::new("startup-before-close")).show(ctx, |ui| {
+                ui.set_width(420.);
+                ui.heading("Closing workspace");
+                ui.add_space(16.);
+                ui.spinner();
+                ui.label("Waiting for terminal startup to finish.");
+            });
+        }
         if let Some(id) = self.terminal_question.clone() {
             let name = self
                 .definition(&id)
@@ -294,20 +353,25 @@ impl App {
                     ui.heading(if self.explicit_quit {
                         "Quit Terminal Workspace?"
                     } else {
-                        "Close Terminal Workspace?"
+                        "Close window?"
                     });
                     ui.add_space(12.);
                     ui.label(format!(
-                        "{} terminals are running. Stopping ends this app’s owned processes.",
+                        "{} terminals are running. Stopping them may interrupt work.",
                         self.runtime.running()
                     ));
                     if !self.explicit_quit {
                         ui.add_space(8.);
                         ui.checkbox(&mut self.remember, "Don’t show this again");
+                        ui.label(
+                            RichText::new("Remember the action you choose below.")
+                                .size(12.)
+                                .color(Color32::from_gray(170)),
+                        );
                     }
                     ui.add_space(24.);
                     ui.horizontal(|ui| {
-                        let total = if self.explicit_quit { 160. } else { 372. };
+                        let total = if self.explicit_quit { 310. } else { 372. };
                         ui.add_space(((ui.available_width() - total) / 2.).max(0.));
                         let cancel = ui.add_sized([76., 32.], egui::Button::new("Cancel"));
                         if first {
@@ -325,11 +389,25 @@ impl App {
                         }
                         if ui
                             .add_sized(
-                                [if self.explicit_quit { 76. } else { 132. }, 32.],
-                                egui::Button::new(if self.explicit_quit {
-                                    "Quit"
+                                [if self.explicit_quit { 226. } else { 132. }, 34.],
+                                egui::Button::new(
+                                    RichText::new(if self.explicit_quit {
+                                        "Stop terminals and quit"
+                                    } else {
+                                        "Stop and close"
+                                    })
+                                    .color(
+                                        if self.explicit_quit {
+                                            Color32::WHITE
+                                        } else {
+                                            Color32::from_gray(23)
+                                        },
+                                    ),
+                                )
+                                .fill(if self.explicit_quit {
+                                    Color32::from_rgb(170, 55, 64)
                                 } else {
-                                    "Stop and close"
+                                    Color32::from_gray(240)
                                 }),
                             )
                             .clicked()
@@ -418,7 +496,8 @@ impl App {
             w.terminals.push(def.clone());
             w.dock.push_to_focused_leaf(Pane::Terminal(id.clone()));
             self.starting.insert(id.clone());
-            self.focus_request=Some(id.clone());self.focus = Some(id);
+            self.focus_request = Some(id.clone());
+            self.focus = Some(id);
             self.runtime.spawn(def, ctx, self.saved.settings.scrollback);
             self.changed();
         }
@@ -450,9 +529,11 @@ impl App {
         });
     }
     fn focus_pane(&mut self, pane: Pane) {
-        if self.index().is_none() {
-            self.global_pane = Some(pane.clone());
+        if matches!(pane, Pane::Settings | Pane::History) {
+            self.global_pane = Some(pane);
+            return;
         }
+        self.global_pane = None;
         if let Some(i) = self.index() {
             let dock = &mut self.saved.workspaces[i].dock;
             if let Some(path) = dock.find_tab(&pane) {
@@ -461,7 +542,7 @@ impl App {
                 dock.push_to_focused_leaf(pane.clone());
             }
             if let Pane::Terminal(id) = pane {
-                self.focus_request=Some(id.clone());
+                self.focus_request = Some(id.clone());
                 self.focus = Some(id);
             }
             self.changed();
@@ -469,6 +550,7 @@ impl App {
     }
     fn process_actions(&mut self, ctx: &egui::Context) {
         if self.saved_action == Some(terminal_workspace::closing::Choice::Stop)
+            || self.final_exit_save
             || self.shutdown_waiting
             || self.shutdown_started.is_some()
         {
@@ -477,10 +559,104 @@ impl App {
         self.actions.extend(self.rx.try_iter());
         for action in std::mem::take(&mut self.actions) {
             match action {
+                Action::LocateImage(old) => {
+                    let tx = self.tx.clone();
+                    let context = ctx.clone();
+                    std::thread::spawn(move || {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "bmp"])
+                            .pick_file()
+                        {
+                            let _ = tx.send(Action::ImageLocated(old, path));
+                            context.request_repaint();
+                        }
+                    });
+                }
+                Action::ImageLocated(old, path) => {
+                    for workspace in &mut self.saved.workspaces {
+                        if let Some(old_tab) = workspace.dock.find_tab(&Pane::Image(old.clone())) {
+                            if workspace
+                                .dock
+                                .find_tab(&Pane::Image(path.clone()))
+                                .is_some()
+                                && old != path
+                            {
+                                workspace.dock.remove_tab(old_tab);
+                            } else {
+                                for (_, tab) in workspace.dock.iter_all_tabs_mut() {
+                                    if *tab == Pane::Image(old.clone()) {
+                                        *tab = Pane::Image(path.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if self.maximized == Some(Pane::Image(old.clone())) {
+                        self.maximized = Some(Pane::Image(path));
+                    }
+                    self.images.remove(&old);
+                    self.image_errors.remove(&old);
+                    self.loading.remove(&old);
+                    self.changed();
+                }
+                Action::LocateWorkspace(id) => {
+                    let tx = self.tx.clone();
+                    let ctx = ctx.clone();
+                    std::thread::spawn(move || {
+                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                            let action =
+                                match terminal_workspace::process::canonical_directory(&path) {
+                                    Ok(path) => Action::WorkspaceMoved(id, path),
+                                    Err(error) => Action::Error(format!("{error:#}")),
+                                };
+                            let _ = tx.send(action);
+                            ctx.request_repaint();
+                        }
+                    });
+                }
+                Action::WorkspaceMoved(id, path) => {
+                    if let Some(workspace) = self
+                        .saved
+                        .workspaces
+                        .iter_mut()
+                        .find(|workspace| workspace.id == id)
+                    {
+                        let old = workspace.directory.clone();
+                        workspace.directory = path.clone();
+                        for terminal in &mut workspace.terminals {
+                            if let Ok(relative) = terminal.directory.strip_prefix(&old) {
+                                terminal.directory = path.join(relative);
+                            }
+                        }
+                        self.changed();
+                    }
+                }
+                Action::EditCommand(id) => {
+                    if let Some(definition) = self.definition(&id) {
+                        let command = match &definition.tool {
+                            Tool::Custom(command) => command.clone(),
+                            Tool::OpenCode => "opencode".into(),
+                            Tool::ClaudeCode => "claude".into(),
+                            Tool::Codex => "codex".into(),
+                            Tool::PowerShell => "powershell".into(),
+                        };
+                        self.form = Some(Form {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            validating: false,
+                            start: Tool::PowerShell,
+                            name: "Custom command".into(),
+                            folder: definition.directory.to_string_lossy().into(),
+                            command,
+                            custom: true,
+                            error: String::new(),
+                        });
+                    }
+                }
                 Action::NewWorkspace => {
                     self.form = Some(Form {
                         id: uuid::Uuid::new_v4().to_string(),
                         validating: false,
+                        start: Tool::PowerShell,
                         name: String::new(),
                         folder: String::new(),
                         command: String::new(),
@@ -532,8 +708,19 @@ impl App {
                         let workspace = Workspace::new(name, directory);
                         self.saved.selected = Some(workspace.id.clone());
                         self.saved.workspaces.push(workspace);
+                        let tool = self
+                            .form
+                            .as_ref()
+                            .map(|form| {
+                                if matches!(form.start, Tool::Custom(_)) {
+                                    Tool::Custom(form.command.clone())
+                                } else {
+                                    form.start.clone()
+                                }
+                            })
+                            .unwrap_or(Tool::PowerShell);
                         self.form = None;
-                        self.add_terminal(Tool::PowerShell, ctx);
+                        self.add_terminal(tool, ctx);
                     }
                 }
                 Action::FormError(id, error) => {
@@ -549,6 +736,7 @@ impl App {
                         self.form = Some(Form {
                             id: uuid::Uuid::new_v4().to_string(),
                             validating: false,
+                            start: Tool::PowerShell,
                             name: "Custom command".into(),
                             folder: self.saved.workspaces[i].directory.to_string_lossy().into(),
                             command: String::new(),
@@ -615,6 +803,15 @@ impl App {
                     {
                         continue;
                     }
+                    if self
+                        .runtime
+                        .terminals
+                        .get(&id)
+                        .is_some_and(|t| t.job.active().unwrap_or(1) > 0)
+                    {
+                        self.error = Some("This terminal still owns running processes. Stop it before starting another command.".into());
+                        continue;
+                    }
                     if let Some(def) = self.definition(&id).cloned() {
                         self.runtime.terminals.remove(&id);
                         self.starting.insert(id.clone());
@@ -635,7 +832,9 @@ impl App {
                     }
                 }
                 Action::Maximize(pane) => {
-                    if let Pane::Terminal(id)=&pane{self.focus_request=Some(id.clone());}
+                    if let Pane::Terminal(id) = &pane {
+                        self.focus_request = Some(id.clone());
+                    }
                     self.maximized = if self.maximized.as_ref() == Some(&pane) {
                         None
                     } else {
@@ -643,26 +842,39 @@ impl App {
                     };
                 }
                 Action::Close(pane) => {
-                    if let Pane::Terminal(ref id) = pane {
-                        if self
-                            .runtime
-                            .terminals
-                            .get(id)
-                            .is_some_and(|t| t.job.active().unwrap_or(1) > 0)
-                        {
-                            self.terminal_question = Some(id.clone());
-                            continue;
-                        }
-                        self.runtime.terminals.remove(id);
-                        self.runtime.bridge.forget(id);
+                    if matches!(pane, Pane::Settings | Pane::History) {
+                        self.global_pane = None;
+                        self.focus_request = self.focus.clone();
+                        continue;
                     }
-                    if let Some(i) = self.index() {
-                        let w = &mut self.saved.workspaces[i];
-                        if let Some(path) = w.dock.find_tab(&pane) {
-                            w.dock.remove_tab(path);
-                        }
-                        if let Pane::Terminal(id) = pane {
-                            w.terminals.retain(|t| t.id != id);
+                    if let Some(index) = self.index() {
+                        if let Pane::Terminal(id) = &pane {
+                            let active = self
+                                .runtime
+                                .terminals
+                                .get(id)
+                                .is_some_and(|terminal| terminal.job.active().unwrap_or(1) > 0);
+                            match self.saved.workspaces[index].remove_terminal(
+                                id,
+                                self.starting.contains(id),
+                                active,
+                            ) {
+                                TerminalRemoval::Starting => {
+                                    self.error=Some("This terminal is still starting. Wait for startup to finish, then close it.".into());
+                                    continue;
+                                }
+                                TerminalRemoval::RequiresStop => {
+                                    self.terminal_question = Some(id.clone());
+                                    continue;
+                                }
+                                TerminalRemoval::Removed => {
+                                    self.runtime.terminals.remove(id);
+                                    self.runtime.bridge.forget(id);
+                                }
+                            }
+                        } else if let Some(path) = self.saved.workspaces[index].dock.find_tab(&pane)
+                        {
+                            self.saved.workspaces[index].dock.remove_tab(path);
                         }
                     }
                     self.maximized = None;
@@ -730,71 +942,13 @@ impl App {
         w.terminals.push(def.clone());
         w.dock.push_to_focused_leaf(Pane::Terminal(id.clone()));
         self.starting.insert(id.clone());
-        self.focus_request=Some(id.clone());self.focus = Some(id);
+        self.focus_request = Some(id.clone());
+        self.focus = Some(id);
         self.runtime.spawn(def, ctx, self.saved.settings.scrollback);
         self.changed();
     }
     fn history_ui(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(16.);
-        ui.heading("Past chats");
-        ui.weak("OpenCode · current project");
-        ui.add_space(12.);
-        ui.horizontal(|ui| {
-            if ui
-                .add(
-                    egui::TextEdit::singleline(&mut self.history.search)
-                        .hint_text("Search chat titles"),
-                )
-                .changed()
-            {
-                self.history.changed = Some(Instant::now());
-            }
-            if ui.button("Refresh").clicked() {
-                self.actions.push(Action::History(None));
-            }
-        });
-        if self.history.busy {
-            ui.spinner();
-        }
-        if let Some(error) = &self.history.error {
-            ui.label(error);
-            if ui.button("Retry").clicked() {
-                self.actions.push(Action::History(None));
-            }
-        }
-        if let Some(page) = &self.history.page {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if page.data.is_empty() {
-                    ui.label("No OpenCode chats found for this project.");
-                }
-                for chat in &page.data {
-                    ui.add_space(8.);
-                    ui.horizontal(|ui| {
-                        if ui
-                            .button(chat.title.as_deref().unwrap_or("Untitled chat"))
-                            .on_hover_text(&chat.id)
-                            .clicked()
-                        {
-                            self.actions.push(Action::Resume(chat.clone()));
-                        }
-                    });
-                    ui.weak(chat.location.directory.to_string_lossy());
-                    ui.separator();
-                }
-                ui.horizontal(|ui| {
-                    if let Some(cursor) = &page.cursor.previous {
-                        if ui.button("Newer").clicked() {
-                            self.actions.push(Action::History(Some(cursor.clone())));
-                        }
-                    }
-                    if let Some(cursor) = &page.cursor.next {
-                        if ui.button("Older").clicked() {
-                            self.actions.push(Action::History(Some(cursor.clone())));
-                        }
-                    }
-                });
-            });
-        }
+        self.history_surface(ui);
     }
     fn attach(&mut self, id: &str, paths: Vec<PathBuf>, ctx: &egui::Context) {
         let Some(def) = self.definition(id).cloned() else {
@@ -840,334 +994,121 @@ impl App {
         }
     }
     fn terminal(&mut self, ui: &mut egui::Ui, id: &str) {
-        ui.horizontal(|ui| {
-            ui.weak(self.status(id));
-            if ui
-                .small_button(if self.maximized.is_some() {
-                    "Restore"
-                } else {
-                    "Maximize"
-                })
-                .clicked()
-            {
-                self.actions
-                    .push(Action::Maximize(Pane::Terminal(id.into())));
-            }
-            ui.menu_button("Attach", |ui| {
-                ui.label(format!(
-                    "To {}",
-                    self.definition(id)
-                        .map(|d| d.name.as_str())
-                        .unwrap_or("terminal")
-                ));
-                if ui.button("Files…").clicked() {
-                    self.picker(Some(id.into()), false, ui.ctx());
-                    ui.close();
-                }
-                if ui.button("Folder reference…").clicked() {
-                    self.picker(Some(id.into()), true, ui.ctx());
-                    ui.close();
-                }
-                if ui.button("Paste screenshot · Ctrl+Shift+I").clicked() {
-                    self.actions.push(Action::Screenshot(id.into()));
-                    ui.close();
-                }
-                ui.weak("Inserts references without sending");
-            });
-        });
-        if let Some(chat) = self.definition(id).and_then(|d| d.chat.as_ref()).cloned() {
-            let images = self
-                .runtime
-                .bridge
-                .state
-                .lock()
-                .unwrap()
-                .images
-                .get(&chat)
-                .cloned()
-                .unwrap_or_default();
-            if !images.is_empty() {
-                ui.menu_button("Images", |ui| {
-                    for uri in images {
-                        if let Ok(url) = url::Url::parse(&uri) {
+        let opencode = self
+            .definition(id)
+            .is_some_and(|definition| definition.tool == Tool::OpenCode);
+        let staged = self
+            .definition(id)
+            .and_then(|definition| definition.chat.as_ref())
+            .map(|chat| !self.runtime.bridge.files(chat).is_empty())
+            .unwrap_or(false);
+        let footer = if opencode {
+            if staged { 112. } else { 48. }
+        } else {
+            0.
+        };
+        if let Some(error) = self.failures.get(id).cloned() {
+            self.terminal_failure(ui, id, &error);
+            return;
+        }
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(12, 12))
+            .show(ui, |ui| {
+                let size = egui::vec2(
+                    ui.available_width(),
+                    (ui.available_height() - footer).max(30.),
+                );
+                if let Some(terminal) = self.runtime.terminals.get_mut(id) {
+                    let current_focus = ui.memory(|memory| memory.focused());
+                    let focused = (self.focus_request.as_deref() == Some(id)
+                        || current_focus
+                            .is_some_and(|focus| self.terminal_widgets.get(id) == Some(&focus)))
+                        && self.form.is_none()
+                        && !self.close
+                        && self.error.is_none()
+                        && self.resume_question.is_none()
+                        && self.saved_action.is_none()
+                        && !self.shutdown_waiting
+                        && self.shutdown_started.is_none()
+                        && self.terminal_question.is_none()
+                        && self.terminal_stopping.is_none();
+                    let view = egui_term::TerminalView::new(ui, &mut terminal.backend)
+                        .set_focus(focused)
+                        .set_size(size)
+                        .set_font(egui_term::TerminalFont::new(egui_term::FontSettings {
+                            font_type: egui::FontId::monospace(self.saved.settings.font_size),
+                        }));
+                    let response = ui.add(view);
+                    self.terminal_widgets.insert(id.into(), response.id);
+                    if focused && self.focus_request.as_deref() == Some(id) {
+                        self.focus_request = None;
+                    }
+                    if response.clicked() {
+                        self.focus = Some(id.into());
+                        self.focus_request = Some(id.into());
+                        ui.ctx().request_repaint();
+                    }
+                    if response.hovered() {
+                        let files = ui.ctx().input(|i| i.raw.dropped_files.clone());
+                        if !files.is_empty() {
+                            self.actions.push(Action::Attach(
+                                id.into(),
+                                files
+                                    .into_iter()
+                                    .map(|file| file.path().to_owned())
+                                    .collect(),
+                            ));
+                        }
+                        if ui.ctx().input(|i| !i.raw.hovered_files.is_empty()) {
+                            ui.painter().rect_stroke(
+                                response.rect,
+                                4.,
+                                egui::Stroke::new(2., Color32::from_rgb(72, 171, 223)),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                    }
+                    for link in terminal.backend.take_opened_links() {
+                        if let Ok(url) = url::Url::parse(&link) {
                             if let Ok(path) = url.to_file_path() {
-                                if ui
-                                    .button(path.file_name().unwrap_or_default().to_string_lossy())
-                                    .clicked()
-                                {
-                                    self.actions.push(Action::Preview(path));
-                                    ui.close();
-                                }
+                                self.actions.push(Action::Preview(path));
                             }
                         }
                     }
-                });
-            }
-            let files = self.runtime.bridge.files(&chat);
-            if !files.is_empty() {
-                ui.horizontal_wrapped(|ui| {
-                    ui.weak("Staged:");
-                    for file in files {
-                        if ui
-                            .small_button(format!("{}  ×", file.name))
-                            .on_hover_text("Remove reference")
-                            .clicked()
-                        {
-                            self.runtime.bridge.remove(&chat, &file.uri);
-                        }
-                    }
-                });
-            }
-        }
-        if let Some(error) = self.failures.get(id) {
-            ui.colored_label(Color32::from_rgb(231, 157, 135), error);
-        }
-        if let Some(terminal) = self.runtime.terminals.get_mut(id) {
-            let size = ui.available_size();
-            let current_focus=ui.memory(|memory|memory.focused());
-            let focused = (self.focus_request.as_deref()==Some(id)||current_focus.is_some_and(|focus|self.terminal_widgets.get(id)==Some(&focus)))
-                && self.form.is_none()
-                && !self.close
-                && self.error.is_none()
-                && self.resume_question.is_none()
-                && self.saved_action.is_none()
-                && !self.shutdown_waiting
-                && self.shutdown_started.is_none();
-            let focused=focused&&self.terminal_question.is_none()&&self.terminal_stopping.is_none();
-            let view = egui_term::TerminalView::new(ui, &mut terminal.backend)
-                .set_focus(focused)
-                .set_size(size)
-                .set_font(egui_term::TerminalFont::new(egui_term::FontSettings {
-                    font_type: egui::FontId::monospace(self.saved.settings.font_size),
-                }));
-            let response = ui.add(view);
-            self.terminal_widgets.insert(id.into(),response.id);
-            if focused&&self.focus_request.as_deref()==Some(id){self.focus_request=None;}
-            if response.clicked() {
-                self.focus = Some(id.into());
-                self.focus_request=Some(id.into());ui.ctx().request_repaint();
-            }
-            if response.hovered() {
-                let files = ui.ctx().input(|i| i.raw.dropped_files.clone());
-                if !files.is_empty() {
-                    self.actions.push(Action::Attach(
-                        id.into(),
-                        files.into_iter().map(|f| f.path().to_owned()).collect(),
-                    ));
+                } else {
+                    ui.allocate_ui(size, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space((size.y * 0.33).max(10.));
+                            ui.label(
+                                RichText::new("Saved terminal is stopped")
+                                    .size(18.)
+                                    .strong(),
+                            );
+                            ui.add_space(8.);
+                            ui.weak("Commands never restart automatically.");
+                            ui.add_space(18.);
+                            if ui
+                                .add_sized([150., 34.], egui::Button::new("Start terminal"))
+                                .clicked()
+                            {
+                                self.actions.push(Action::Launch(id.into()));
+                            }
+                        });
+                    });
                 }
-                if ui.ctx().input(|i| !i.raw.hovered_files.is_empty()) {
-                    ui.painter().rect_stroke(
-                        response.rect,
-                        0.,
-                        egui::Stroke::new(2., Color32::from_rgb(150, 182, 192)),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-            }
-            for link in terminal.backend.take_opened_links() {
-                if let Ok(url) = url::Url::parse(&link) {
-                    if let Ok(path) = url.to_file_path() {
-                        self.actions.push(Action::Preview(path));
-                    }
-                }
-            }
-        } else {
-            ui.add_space(32.);
-            ui.label("This terminal is stopped.");
-            ui.weak("Saved commands are never started automatically.");
-            if ui.button("Start terminal").clicked() {
-                self.actions.push(Action::Launch(id.into()));
-            }
+            });
+        if opencode {
+            self.attachment_footer(ui, id);
         }
     }
     fn settings(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(20.);
-            ui.heading("Settings");
-            ui.add_space(20.);
-            ui.label("Terminal");
-            let mut changed = ui
-                .add(
-                    egui::Slider::new(&mut self.saved.settings.font_size, 10.0..=28.0)
-                        .text("Font size"),
-                )
-                .changed();
-            changed |= ui
-                .add(
-                    egui::Slider::new(&mut self.saved.settings.scrollback, 1000..=50000)
-                        .text("Scrollback lines"),
-                )
-                .changed();
-            ui.add_space(20.);
-            ui.label("When closing the window");
-            changed |= ui
-                .radio_value(
-                    &mut self.saved.settings.closing,
-                    Closing::Ask,
-                    "Ask every time",
-                )
-                .changed();
-            changed |= ui
-                .radio_value(
-                    &mut self.saved.settings.closing,
-                    Closing::Background,
-                    "Run in background",
-                )
-                .changed();
-            changed |= ui
-                .radio_value(
-                    &mut self.saved.settings.closing,
-                    Closing::Stop,
-                    "Stop and close",
-                )
-                .changed();
-            if changed {
-                for terminal in self.runtime.terminals.values_mut() {
-                    terminal
-                        .backend
-                        .set_scrollback(self.saved.settings.scrollback);
-                }
-                self.changed();
-            }
-            ui.add_space(24.);
-            ui.label("Keyboard shortcuts");
-            for (name, key) in [
-                ("New workspace", "Ctrl+Shift+N"),
-                ("New terminal", "Ctrl+Shift+T"),
-                ("Settings", "Ctrl+,"),
-                ("Paste screenshot", "Ctrl+Shift+I"),
-                ("Restore pane", "Escape"),
-            ] {
-                ui.add_space(10.);
-                ui.horizontal(|ui| {
-                    ui.label(name);
-                    ui.add_space(30.);
-                    egui::Frame::new()
-                        .stroke(egui::Stroke::new(1., Color32::from_gray(65)))
-                        .inner_margin(egui::Margin::symmetric(7, 4))
-                        .corner_radius(4)
-                        .show(ui, |ui| {
-                            ui.monospace(key);
-                        });
-                });
-                ui.add_space(10.);
-                ui.separator();
-            }
-        });
+        self.settings_surface(ui);
     }
     fn image(&mut self, ui: &mut egui::Ui, path: &PathBuf) {
-        if !self.images.contains_key(path)
-            && !self.image_errors.contains_key(path)
-            && self.loading.insert(path.clone())
-        {
-            self.media.request(path, ui.ctx());
-        }
-        if let Some(image) = self.images.get_mut(path) {
-            ui.horizontal(|ui| {
-                if ui.button("Fit").clicked() {
-                    image.fit = true;
-                }
-                if ui.button("−").clicked() {
-                    image.fit = false;
-                    image.zoom = (image.zoom / 1.25).max(0.05);
-                }
-                if ui.button("+").clicked() {
-                    image.fit = false;
-                    image.zoom = (image.zoom * 1.25).min(16.);
-                }
-                ui.weak(format!("{:.0}%", image.zoom * 100.));
-            });
-            let native = image.texture.size_vec2();
-            if image.fit {
-                let space = ui.available_size();
-                image.zoom = (space.x / native.x)
-                    .min(space.y / native.y)
-                    .min(1.)
-                    .max(0.01);
-            }
-            egui::ScrollArea::both()
-                .scroll_source(egui::scroll_area::ScrollSource::ALL)
-                .show(ui, |ui| {
-                    ui.image((image.texture.id(), native * image.zoom));
-                });
-        } else if let Some(error) = self.image_errors.get(path) {
-            ui.label(error);
-            if ui.button("Retry").clicked() {
-                self.loading.insert(path.clone());
-                self.media.request(path, ui.ctx());
-            }
-        } else {
-            ui.spinner();
-            ui.label("Loading image…");
-        }
+        self.image_surface(ui, path);
     }
     fn form(&mut self, ctx: &egui::Context) {
-        if self.form.is_none() {
-            return;
-        }
-        let (mut browse, mut create, mut cancel) = (false, false, false);
-        let form = self.form.as_mut().unwrap();
-        egui::Modal::new(egui::Id::new("workspace-form")).show(ctx, |ui| {
-            ui.set_width(430.);
-            ui.heading(if form.custom {
-                "Custom command"
-            } else {
-                "New workspace"
-            });
-            ui.add_space(16.);
-            if !form.custom {
-                ui.label("Workspace name");
-                ui.text_edit_singleline(&mut form.name);
-            } else {
-                ui.label("Command");
-                ui.text_edit_singleline(&mut form.command);
-            }
-            ui.add_space(12.);
-            ui.label("Project folder");
-            ui.horizontal(|ui| {
-                ui.text_edit_singleline(&mut form.folder);
-                browse = ui.button("Browse…").clicked();
-            });
-            if form.validating {
-                ui.spinner();
-            }
-            if !form.error.is_empty() {
-                ui.colored_label(Color32::LIGHT_RED, &form.error);
-            }
-            ui.add_space(20.);
-            ui.horizontal(|ui| {
-                cancel = ui.button("Cancel").clicked();
-                create = ui
-                    .add_enabled(
-                        !form.validating,
-                        egui::Button::new(if form.custom {
-                            "Open terminal"
-                        } else {
-                            "Create workspace"
-                        }),
-                    )
-                    .clicked();
-            });
-        });
-        if browse {
-            self.picker(None, true, ctx);
-        }
-        if cancel || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.form = None;
-        } else if create {
-            if self.form.as_ref().unwrap().custom {
-                let form = self.form.take().unwrap();
-                if !form.command.trim().is_empty() {
-                    self.add_terminal_at(
-                        Tool::Custom(form.command),
-                        PathBuf::from(form.folder),
-                        ctx,
-                    );
-                }
-            } else {
-                self.actions.push(Action::CreateWorkspace);
-            }
-        }
+        self.creation_surface(ctx);
     }
 }
 struct Viewer<'a>(&'a mut App);
@@ -1177,17 +1118,40 @@ impl TabViewer for Viewer<'_> {
         egui::Id::new(tab)
     }
     fn title(&mut self, tab: &mut Pane) -> egui::WidgetText {
-        match tab {
-            Pane::Terminal(id) => self
-                .0
-                .definition(id)
-                .map(|d| d.name.clone())
-                .unwrap_or("Terminal".into()),
-            Pane::Image(p) => p.file_name().unwrap_or_default().to_string_lossy().into(),
-            Pane::Settings => "Settings".into(),
-            Pane::History => "Past chats".into(),
+        egui::RichText::new(self.0.pane_name(tab))
+            .color(Color32::TRANSPARENT)
+            .into()
+    }
+    fn on_tab_button(&mut self, tab: &mut Pane, response: &egui::Response) {
+        self.0.paint_header(tab, response);
+    }
+    fn context_menu(&mut self, ui: &mut egui::Ui, tab: &mut Pane, _: egui_dock::NodePath) {
+        if ui
+            .button(if self.0.maximized.is_some() {
+                "Restore pane"
+            } else {
+                "Maximize pane"
+            })
+            .clicked()
+        {
+            self.0.actions.push(Action::Maximize(tab.clone()));
+            ui.close();
         }
-        .into()
+        if let Pane::Terminal(id) = tab {
+            ui.separator();
+            if ui.button("Add files…").clicked() {
+                self.0.picker(Some(id.clone()), false, ui.ctx());
+                ui.close();
+            }
+            if ui.button("Add folder reference…").clicked() {
+                self.0.picker(Some(id.clone()), true, ui.ctx());
+                ui.close();
+            }
+            if ui.button("Paste screenshot").clicked() {
+                self.0.actions.push(Action::Screenshot(id.clone()));
+                ui.close();
+            }
+        }
     }
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Pane) {
         match tab {
@@ -1213,6 +1177,22 @@ impl TabViewer for Viewer<'_> {
 impl eframe::App for App {
     fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         let ctx = context.clone();
+        while let Some(event) = self.font_loader.poll() {
+            match event {
+                crate::fonts::Event::Catalog(choices) => self.font_choices = choices,
+                crate::fonts::Event::Applied {
+                    requested,
+                    actual,
+                    error,
+                } => {
+                    if requested == self.saved.settings.font_family {
+                        self.font_actual = actual;
+                        self.font_error = error;
+                    }
+                }
+            }
+        }
+
         for response in self.history_rx.try_iter() {
             if response.generation == self.history.generation {
                 self.history.busy = false;
@@ -1247,21 +1227,6 @@ impl eframe::App for App {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
         }
-        let associations = self.runtime.bridge.state.lock().unwrap().current.clone();
-        let mut association_changed = false;
-        for workspace in &mut self.saved.workspaces {
-            for definition in &mut workspace.terminals {
-                if let Some(chat) = associations.get(&definition.id) {
-                    if definition.chat.as_ref() != Some(chat) {
-                        definition.chat = Some(chat.clone());
-                        association_changed = true;
-                    }
-                }
-            }
-        }
-        if association_changed {
-            self.changed();
-        }
         if self
             .runtime
             .terminals
@@ -1288,15 +1253,48 @@ impl eframe::App for App {
             }
             self.changed();
         }
+        let associations = self.runtime.bridge.state.lock().unwrap().current.clone();
+        let mut association_changed = false;
+        for workspace in &mut self.saved.workspaces {
+            for definition in &mut workspace.terminals {
+                if let Some(chat) = associations.get(&definition.id) {
+                    if definition.chat.as_ref() != Some(chat) {
+                        definition.chat = Some(chat.clone());
+                        association_changed = true;
+                    }
+                }
+            }
+        }
+        if association_changed {
+            self.changed();
+        }
+        if self.pending_stop_save {
+            if self.starting.is_empty() {
+                self.pending_stop_save = false;
+                let generation = self.writer.save(self.saved.clone());
+                self.save_gate.wait(generation);
+                self.dirty = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+        }
         while let Some((generation, result)) = self.writer.poll() {
             match result {
                 Err(error) => {
+                    self.save_failed = true;
                     self.error = Some(error);
                     self.saved_action = None;
+                    self.final_exit_save = false;
                     self.closing = false;
                 }
                 Ok(()) => {
+                    self.save_failed = false;
                     if self.save_gate.acknowledge(generation) {
+                        if self.final_exit_save {
+                            self.final_exit_save = false;
+                            self.closing = true;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
                         match self.saved_action.take() {
                             Some(terminal_workspace::closing::Choice::Background) => {
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false))
@@ -1318,8 +1316,16 @@ impl eframe::App for App {
         if self.shutdown_started.is_some() {
             match self.runtime.remaining() {
                 Ok(0) => {
-                    self.closing = true;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.shutdown_started = None;
+                    if self.discard_on_exit {
+                        self.closing = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    } else {
+                        let generation = self.writer.save(self.saved.clone());
+                        self.save_gate.wait(generation);
+                        self.final_exit_save = true;
+                        self.dirty = None;
+                    }
                 }
                 Ok(_) => {}
                 Err(error) => {
@@ -1360,6 +1366,14 @@ impl eframe::App for App {
             match result {
                 Ok(decoded) => {
                     self.loading.remove(&decoded.path);
+                    if !self.saved.workspaces.iter().any(|workspace| {
+                        workspace
+                            .dock
+                            .find_tab(&Pane::Image(decoded.path.clone()))
+                            .is_some()
+                    }) {
+                        continue;
+                    }
                     let texture = ctx.load_texture(
                         decoded.path.to_string_lossy(),
                         decoded.image,
@@ -1371,6 +1385,7 @@ impl eframe::App for App {
                             texture,
                             zoom: 1.,
                             fit: true,
+                            pan: egui::Vec2::ZERO,
                         },
                     );
                 }
@@ -1380,12 +1395,40 @@ impl eframe::App for App {
                 }
             }
         }
+        if self
+            .dirty
+            .is_some_and(|t| t.elapsed() > Duration::from_millis(700))
+            && !self.load_error
+            && self.saved_action.is_none()
+            && self.shutdown_started.is_none()
+            && !self.shutdown_waiting
+            && !self.pending_stop_save
+            && !self.final_exit_save
+            && self.drag_snapshot.is_none()
+        {
+            self.writer.save(self.saved.clone());
+            self.dirty = None;
+        }
+        if self.dirty.is_some() || !self.starting.is_empty() || self.final_exit_save {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        let exiting = self.pending_stop_save
+            || self.saved_action == Some(terminal_workspace::closing::Choice::Stop)
+            || self.shutdown_waiting
+            || self.shutdown_started.is_some()
+            || self.final_exit_save;
+        if exiting {
+            ui.disable();
+        }
         if ctx.input(|i| i.viewport().close_requested()) && !self.closing {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            if self.saved_action.is_none() && self.shutdown_started.is_none() {
+            if self.saved_action.is_none()
+                && self.shutdown_started.is_none()
+                && !self.final_exit_save
+            {
                 self.explicit_quit = false;
                 match self.saved.settings.closing {
                     Closing::Ask => self.close = true,
@@ -1418,204 +1461,111 @@ impl eframe::App for App {
                 self.actions.push(Action::Screenshot(id));
             }
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if !exiting && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.maximized = None;
         }
-        egui::Panel::bottom("footer")
-            .exact_size(34.)
+        self.workspace_chrome(ui);
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(Color32::from_rgb(21, 21, 22)))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_sized([240., 26.], egui::Button::new("Settings"))
-                        .clicked()
+                if let Some(pane) = self.global_pane.clone() {
+                    self.maximized_header(ui, &pane);
+                    Viewer(self).ui(ui, &mut pane.clone());
+                } else if let Some(pane) = self.maximized.clone() {
+                    self.maximized_header(ui, &pane);
+                    Viewer(self).ui(ui, &mut pane.clone());
+                } else if let Some(i) = self.index() {
+                    if !exiting && ctx.input(|input| input.pointer.any_pressed()) {
+                        self.drag_snapshot = Some(self.saved.workspaces[i].dock.clone());
+                        self.drag_cancelled = false;
+                    }
+                    if !exiting
+                        && self.drag_snapshot.is_some()
+                        && ctx.input(|input| input.key_pressed(egui::Key::Escape) || !input.focused)
                     {
-                        self.actions.push(Action::Focus(Pane::Settings));
+                        if let Some(previous) = self.drag_snapshot.take() {
+                            self.saved.workspaces[i].dock = previous;
+                        }
+                        self.dock_epoch += 1;
+                        self.drag_cancelled = true;
                     }
-                    ui.separator();
-                    if let Some(i) = self.index() {
-                        ui.weak(self.saved.workspaces[i].directory.to_string_lossy());
-                        ui.separator();
-                        ui.weak(format!(
-                            "{} terminals",
-                            self.saved.workspaces[i].terminals.len()
-                        ));
+                    let mut dock = std::mem::replace(
+                        &mut self.saved.workspaces[i].dock,
+                        DockState::new(Vec::new()),
+                    );
+                    let mut dock_style = egui_dock::Style::from_egui(ui.style());
+                    dock_style.tab_bar.height = 36.;
+                    dock_style.tab_bar.fill_tab_bar = true;
+                    dock_style.tab.minimum_width = Some(140.);
+                    dock_style.tab_bar.bg_fill = Color32::from_rgb(32, 32, 34);
+                    dock_style.tab.tab_body.inner_margin = egui::Margin::ZERO;
+                    dock_style.tab.tab_body.stroke = egui::Stroke::NONE;
+                    dock_style.tab.tab_body.bg_fill = Color32::from_rgb(21, 21, 22);
+                    for interaction in [
+                        &mut dock_style.tab.active,
+                        &mut dock_style.tab.inactive,
+                        &mut dock_style.tab.focused,
+                        &mut dock_style.tab.hovered,
+                    ] {
+                        interaction.corner_radius = egui::CornerRadius::ZERO;
+                        interaction.outline_color = Color32::from_gray(48);
+                        interaction.bg_fill = Color32::from_rgb(35, 35, 37);
                     }
-                });
-            });
-        egui::Panel::left("sidebar")
-            .default_size(256.)
-            .size_range(180.0..=360.0)
-            .show(ui, |ui| {
-                ui.add_space(12.);
-                ui.horizontal(|ui| {
-                    ui.strong("Workspaces");
-                    if ui.button("+").on_hover_text("New workspace").clicked() {
-                        self.actions.push(Action::NewWorkspace);
+                    dock_style.separator.width = 1.;
+                    dock_style.separator.extra = 220.;
+                    dock_style.separator.color_idle = Color32::from_gray(56);
+                    let mut horizontal = true;
+                    let mut vertical = true;
+                    for node in dock.main_surface().iter() {
+                        if let egui_dock::Node::Leaf(leaf) = node {
+                            if leaf.rect.is_finite() {
+                                horizontal &= leaf.rect.width() >= 640.;
+                                vertical &= leaf.rect.height() >= 420.;
+                            }
+                        }
                     }
-                });
-                ui.add_space(12.);
-                let workspaces: Vec<_> = self
-                    .saved
-                    .workspaces
-                    .iter()
-                    .map(|w| {
-                        (
-                            w.id.clone(),
-                            w.name.clone(),
-                            w.directory.clone(),
-                            w.terminals.clone(),
-                        )
-                    })
-                    .collect();
-                for (id, name, directory, terminals) in workspaces {
-                    let selected = self.saved.selected.as_ref() == Some(&id);
-                    if ui
-                        .selectable_label(selected, RichText::new(name).strong())
-                        .on_hover_text(directory.to_string_lossy())
-                        .clicked()
-                    {
-                        self.saved.selected = Some(id);
-                        self.maximized = None;
+                    let splits = match (horizontal, vertical) {
+                        (true, true) => egui_dock::AllowedSplits::All,
+                        (true, false) => egui_dock::AllowedSplits::LeftRightOnly,
+                        (false, true) => egui_dock::AllowedSplits::TopBottomOnly,
+                        _ => egui_dock::AllowedSplits::None,
+                    };
+                    DockArea::new(&mut dock)
+                        .id(egui::Id::new((
+                            &self.saved.workspaces[i].id,
+                            self.dock_epoch,
+                        )))
+                        .style(dock_style)
+                        .show_leaf_close_all_buttons(false)
+                        .show_leaf_collapse_buttons(false)
+                        .allowed_splits(splits)
+                        .draggable_tabs(!self.drag_cancelled)
+                        .show_inside(ui, &mut Viewer(self));
+                    self.saved.workspaces[i].dock = dock;
+                    if !exiting && ctx.input(|i| i.pointer.any_released()) {
+                        self.drag_snapshot = None;
+                        self.drag_cancelled = false;
                         self.changed();
                     }
-                    if selected {
-                        for terminal in terminals {
-                            ui.indent(&terminal.id, |ui| {
-                                if ui
-                                    .selectable_label(
-                                        self.focus.as_ref() == Some(&terminal.id),
-                                        &terminal.name,
-                                    )
-                                    .clicked()
-                                {
-                                    self.actions
-                                        .push(Action::Focus(Pane::Terminal(terminal.id.clone())));
-                                }
-                                ui.weak(self.status(&terminal.id));
-                            });
-                        }
-                    }
-                    ui.add_space(8.);
-                }
-                ui.separator();
-                if ui.button("Past chats").clicked() {
-                    self.actions.push(Action::Focus(Pane::History));
-                }
-            });
-        egui::Panel::top("toolbar").exact_size(42.).show(ui, |ui| {
-            ui.horizontal_centered(|ui| {
-                if let Some(i) = self.index() {
-                    ui.strong(&self.saved.workspaces[i].name);
-                    ui.separator();
-                    ui.menu_button("+ Terminal", |ui| {
-                        for tool in [
-                            Tool::PowerShell,
-                            Tool::OpenCode,
-                            Tool::ClaudeCode,
-                            Tool::Codex,
-                            Tool::Custom(String::new()),
-                        ] {
-                            if ui.button(tool.label()).clicked() {
-                                self.actions.push(Action::NewTerminal(tool));
-                                ui.close();
-                            }
-                        }
-                    });
-                    ui.menu_button("Layout", |ui| {
-                        for (label, preset) in [
-                            ("Columns", Preset::Columns),
-                            ("Rows", Preset::Rows),
-                            ("2 × 2", Preset::Grid),
-                        ] {
-                            if ui.button(label).clicked() {
-                                self.actions.push(Action::Layout(preset));
-                                ui.close();
-                            }
-                        }
-                    });
+                } else if self.global_pane == Some(Pane::Settings) {
+                    self.settings(ui);
                 } else {
-                    ui.strong("Terminal Workspace");
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() * 0.32);
+                        ui.heading("Create a workspace");
+                        ui.add_space(8.);
+                        ui.weak("Choose a project folder and open your first terminal.");
+                        ui.add_space(20.);
+                        if ui.button("New workspace").clicked() {
+                            self.actions.push(Action::NewWorkspace);
+                        }
+                    });
                 }
             });
-        });
-        egui::CentralPanel::default().show(ui, |ui| {
-            if let Some(pane) = self.maximized.clone() {
-                Viewer(self).ui(ui, &mut pane.clone());
-            } else if let Some(i) = self.index() {
-                if ctx.input(|input| input.pointer.any_pressed()) {
-                    self.drag_snapshot = Some(self.saved.workspaces[i].dock.clone());
-                    self.drag_cancelled = false;
-                }
-                if ctx.input(|input| {
-                    input.key_pressed(egui::Key::Escape)
-                        || (!input.focused && input.pointer.any_down())
-                }) {
-                    if let Some(previous) = self.drag_snapshot.take() {
-                        self.saved.workspaces[i].dock = previous;
-                    }
-                    self.dock_epoch += 1;
-                    self.drag_cancelled = true;
-                }
-                let mut dock = std::mem::replace(
-                    &mut self.saved.workspaces[i].dock,
-                    DockState::new(Vec::new()),
-                );
-                let mut dock_style = egui_dock::Style::from_egui(ui.style());
-                dock_style.tab_bar.height = 30.;
-                dock_style.tab.tab_body.inner_margin = egui::Margin::same(6);
-                dock_style.tab.tab_body.stroke = egui::Stroke::NONE;
-                dock_style.tab.tab_body.bg_fill = Color32::from_rgb(21, 21, 22);
-                dock_style.separator.width = 1.;
-                dock_style.separator.extra = 220.;
-                dock_style.separator.color_idle = Color32::from_gray(56);
-                let mut horizontal = true;
-                let mut vertical = true;
-                for node in dock.main_surface().iter() {
-                    if let egui_dock::Node::Leaf(leaf) = node {
-                        if leaf.rect.is_finite() {
-                            horizontal &= leaf.rect.width() >= 640.;
-                            vertical &= leaf.rect.height() >= 420.;
-                        }
-                    }
-                }
-                let splits = match (horizontal, vertical) {
-                    (true, true) => egui_dock::AllowedSplits::All,
-                    (true, false) => egui_dock::AllowedSplits::LeftRightOnly,
-                    (false, true) => egui_dock::AllowedSplits::TopBottomOnly,
-                    _ => egui_dock::AllowedSplits::None,
-                };
-                DockArea::new(&mut dock)
-                    .id(egui::Id::new((
-                        &self.saved.workspaces[i].id,
-                        self.dock_epoch,
-                    )))
-                    .style(dock_style)
-                    .allowed_splits(splits)
-                    .draggable_tabs(!self.drag_cancelled)
-                    .show_inside(ui, &mut Viewer(self));
-                self.saved.workspaces[i].dock = dock;
-                if ctx.input(|i| i.pointer.any_released()) {
-                    self.drag_snapshot = None;
-                    self.drag_cancelled = false;
-                    self.changed();
-                }
-            } else if self.global_pane == Some(Pane::Settings) {
-                self.settings(ui);
-            } else {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(ui.available_height() * 0.32);
-                    ui.heading("Create a workspace");
-                    ui.add_space(8.);
-                    ui.weak("Choose a project folder and open your first terminal.");
-                    ui.add_space(20.);
-                    if ui.button("New workspace").clicked() {
-                        self.actions.push(Action::NewWorkspace);
-                    }
-                });
-            }
-        });
-        self.form(&ctx);
-        if let Some(chat) = self.resume_question.clone() {
+        if !exiting {
+            self.form(&ctx);
+        }
+        if let Some(chat) = self.resume_question.clone().filter(|_| !exiting) {
             let (mut cancel, mut resume) = (false, false);
             egui::Modal::new(egui::Id::new("resume-project")).show(&ctx, |ui| {
                 ui.set_width(440.);
@@ -1637,32 +1587,38 @@ impl eframe::App for App {
         }
         self.close_ui(&ctx);
         if self.error.is_some() {
-            let mut dismiss = false;
-            egui::Modal::new(egui::Id::new("error")).show(&ctx, |ui| {
-                ui.set_width(480.);
-                ui.heading("Something needs attention");
-                ui.add_space(12.);
-                ui.label(self.error.as_deref().unwrap_or_default());
-                ui.add_space(20.);
-                dismiss = ui.button("Dismiss").clicked();
-            });
-            if dismiss {
+            let (mut dismiss, mut discard) = (false, false);
+            let response = egui::Modal::new(egui::Id::new("error"))
+                .frame(egui::Frame::window(&ctx.style_of(egui::Theme::Dark)).inner_margin(24))
+                .show(&ctx, |ui| {
+                    ui.set_width(480.);
+                    ui.heading("Something needs attention");
+                    ui.add_space(16.);
+                    ui.label(self.error.as_deref().unwrap_or_default());
+                    ui.add_space(24.);
+                    ui.horizontal(|ui| {
+                        dismiss = ui.button("Return to app").clicked();
+                        if self.load_error || self.save_failed {
+                            discard = ui.button("Close without saving").clicked();
+                        }
+                    });
+                });
+            if dismiss || response.should_close() {
                 self.error = None;
+            }
+            if discard {
+                self.error = None;
+                self.close = false;
+                self.remember = false;
+                self.saved_action = None;
+                self.pending_stop_save = false;
+                self.discard_on_exit = true;
+                self.shutdown_waiting = true;
+                self.dirty = None;
             }
         }
         self.process_actions(&ctx);
-        if self
-            .dirty
-            .is_some_and(|t| t.elapsed() > Duration::from_millis(700))
-            && !self.load_error
-            && self.saved_action.is_none()
-            && self.shutdown_started.is_none()
-            && !self.shutdown_waiting
-        {
-            self.writer.save(self.saved.clone());
-            self.dirty = None;
-        }
-        if self.dirty.is_some() || !self.starting.is_empty() {
+        if self.dirty.is_some() || !self.starting.is_empty() || self.final_exit_save {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         let live_images: HashSet<_> = self
@@ -1688,7 +1644,36 @@ fn style(ctx: &egui::Context) {
     style.visuals.window_fill = Color32::from_rgb(32, 32, 34);
     style.visuals.extreme_bg_color = Color32::from_rgb(21, 21, 22);
     style.visuals.override_text_color = Some(Color32::from_rgb(237, 237, 237));
-    style.visuals.selection.bg_fill = Color32::from_rgb(55, 74, 82);
+    style.visuals.selection.bg_fill = Color32::from_rgb(62, 62, 66);
+    style.visuals.window_stroke = egui::Stroke::new(1., Color32::from_gray(80));
+    style.visuals.window_corner_radius = egui::CornerRadius::same(6);
+    style.visuals.window_shadow = Default::default();
+    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(36, 36, 38);
+    style.visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(36, 36, 38);
+    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1., Color32::from_gray(72));
+    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(49, 49, 52);
+    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(49, 49, 52);
+    for visual in [
+        &mut style.visuals.widgets.inactive,
+        &mut style.visuals.widgets.hovered,
+        &mut style.visuals.widgets.active,
+        &mut style.visuals.widgets.noninteractive,
+    ] {
+        visual.corner_radius = egui::CornerRadius::same(4);
+    }
+    style
+        .text_styles
+        .insert(egui::TextStyle::Body, egui::FontId::proportional(14.));
+    style
+        .text_styles
+        .insert(egui::TextStyle::Button, egui::FontId::proportional(14.));
+    style
+        .text_styles
+        .insert(egui::TextStyle::Small, egui::FontId::proportional(12.));
+    style
+        .text_styles
+        .insert(egui::TextStyle::Heading, egui::FontId::proportional(20.));
+    style.spacing.interact_size = egui::vec2(32., 32.);
     style.spacing.item_spacing = egui::vec2(8., 8.);
     style.spacing.button_padding = egui::vec2(12., 7.);
     style.spacing.window_margin = egui::Margin::same(20);

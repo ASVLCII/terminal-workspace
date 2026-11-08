@@ -7,6 +7,21 @@ pub struct Decoded {
     pub path: PathBuf,
     pub image: egui::ColorImage,
 }
+pub fn wheel_zoom(current: f32, delta: f32) -> f32 {
+    (current * (delta * 0.0025).exp()).clamp(0.02, 16.)
+}
+#[cfg(test)]
+mod zoom_tests {
+    use super::*;
+    #[test]
+    fn wheel_zoom_moves_in_both_directions_and_stays_bounded() {
+        assert!(wheel_zoom(1., 120.) > 1.);
+        assert!(wheel_zoom(1., -120.) < 1.);
+        assert_eq!(wheel_zoom(1., 100000.), 16.);
+        assert_eq!(wheel_zoom(1., -100000.), 0.02);
+        assert_eq!(wheel_zoom(1., 0.), 1.);
+    }
+}
 pub struct Loader {
     requests: mpsc::SyncSender<(PathBuf, egui::Context)>,
     tx: mpsc::Sender<Result<Decoded, (PathBuf, String)>>,

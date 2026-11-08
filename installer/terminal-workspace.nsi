@@ -64,6 +64,7 @@ Function un.onInit
 FunctionEnd
 Section "Uninstall"
  SetShellVarContext current
+ Delete "$SMPROGRAMS\Terminal Workspace.lnk"
  ; The generated manifest deletes exact payload files and removes empty directories.
  !include "${UNINSTALL_MANIFEST}"
  Delete "$INSTDIR\Uninstall.exe"

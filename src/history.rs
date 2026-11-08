@@ -6,6 +6,8 @@ pub struct Chat {
     #[serde(default)]
     pub title: Option<String>,
     pub location: Location,
+    #[serde(default)]
+    pub time: serde_json::Value,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct Location {

@@ -22,10 +22,10 @@ The packaged executable is `dist/app/terminal-workspace.exe`. The installer is `
 1. Create a workspace and choose a project folder. Its first PowerShell starts explicitly as part of creation.
 2. Use **+ Terminal** for PowerShell, OpenCode, Claude Code, Codex CLI, or a custom PowerShell command.
 3. Drag tabs into highlighted zones to split or group them. Drag straight dividers to resize; double-click a divider to equalize. Columns, Rows and 2×2 reuse existing panes. Extra panes remain as tabs. Maximize keeps the same process; Escape restores the arrangement.
-4. Use **Attach** in the recipient pane. Files, folder references and screenshots are staged for that OpenCode chat. Other terminals receive quoted path references. Nothing sends a prompt automatically. **Ctrl+Shift+I** pastes a screenshot; Ctrl+V remains text paste. Click a local image URI to preview it; registered image references also appear in the pane’s Images menu. Previews support Fit, zoom and drag-to-pan.
+4. Use **Attach** in the recipient pane. Files, folder references and screenshots are staged for that OpenCode chat. Other terminals receive quoted path references. Nothing sends a prompt automatically. **Ctrl+Shift+I** pastes a screenshot; Ctrl+V remains text paste. Click a local image URI to preview it; registered image references also appear in the pane’s Images menu. Previews support Fit, scroll-to-zoom under the pointer, zoom buttons and drag-to-pan.
 5. Open **Past chats** for current-project OpenCode metadata, title search and bounded pagination. Selecting a chat focuses an existing terminal or explicitly resumes it. Other tools’ chat history is outside this release.
 
-Settings is pinned in the bottom-left footer. It controls font size, bounded scrollback and closing behavior, with a shortcut reference. Default terminal text is 14 logical points and scrollback is 10,000 lines.
+Settings is pinned in the bottom-left footer. It controls terminal font family and size, bounded scrollback and closing behavior, with a shortcut reference. The default terminal font is CaskaydiaMono NFM (the installed Nerd Font used by the Xelif Windows Terminal profile), at 14 logical points, with 10,000 scrollback lines. Settings lists installed monospace fonts. Missing fonts fall back with an explanation; font files are loaded from this PC and are not bundled.
 
 ## Saving, closing and background mode
 

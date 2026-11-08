@@ -2,6 +2,7 @@
 mod app;
 mod fonts;
 mod foundation;
+mod icons;
 fn main() -> eframe::Result {
     if std::env::args().any(|a| a == "--foundation" || a == "--opencode-gate") {
         return foundation::run();

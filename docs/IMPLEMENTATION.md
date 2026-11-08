@@ -18,7 +18,7 @@ Implementation status does not imply every release gate has passed.
 
 ## Verified so far
 
-- Rust workspace: 29 unit tests passed (9 terminal component, 20 host/model/bridge/recovery/process tests). The live OpenCode test is opt-in and passed separately.
+- Rust workspace: 33 unit tests passed (9 terminal component, 24 host/model/bridge/recovery/process tests). The live OpenCode test is opt-in and passed separately.
 - Installed OpenCode 2.2.5: two chats in one directory, file/folder/image admission only to the selected chat, no automatic prompt, durable acknowledgement, untouched other chat, metadata listing and source project. Test admissions use `resume:false`; no model execution is requested.
 - Real native window: two OpenCode TUI handshakes with three staged references in A and none in B; image-link click opens a native preview.
 - PowerShell: real keyboard command execution, input with pointer outside the pane, native workspace creation/save, restored definitions remain stopped, layout operations preserve the same shell PIDs.
@@ -28,6 +28,10 @@ Implementation status does not imply every release gate has passed.
 - Recovery: corrupt primary JSON falls back to a good backup; future versions are preserved; invalid proportions and duplicate terminal identities are rejected.
 - Focus regression: a real history search previously entered a neighboring terminal. The reproducer failed on the older release binary and passed with the corrected widget focus routing.
 - Vietnamese combining-mark regression: decomposed marks are retained with the base glyph (failed before the renderer correction, passed after). Physical IME acceptance is still separate.
+
+- Default terminal font: installed CaskaydiaMono NFM, including its localized family alias. Native font-picker round trip through Consolas and back saved correctly and retained all existing terminal process IDs. Image wheel zoom changed 18% to 27% in the real preview.
+- UI revised against the four boards: grouped sidebar and pinned footer, compact pane headers, full-main Settings/Past Chats, native line icons, flat surfaces and aligned controls. Final multi-scaling visual acceptance remains open.
+- Quitting during delayed OpenCode startup: older release lost the chat reference (regression failed); corrected debug preserved it. Starting-terminal removal is guarded before layout/state mutation. Independent review identified descendant relaunch and final-save ordering edges; fixes preserve live jobs and acknowledge a final save after shutdown.
 
 ## Memory investigation
 
