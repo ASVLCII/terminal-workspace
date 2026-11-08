@@ -1,0 +1,7 @@
+/target/
+/.work/
+/.superpowers/
+/dist/
+/artifacts/
+/plugin/node_modules/
+*.log
