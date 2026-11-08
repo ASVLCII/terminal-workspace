@@ -115,12 +115,13 @@ fn replace(source: &std::path::Path, destination: &std::path::Path) -> Result<()
 }
 
 pub struct Writer {
-    tx: std::sync::mpsc::Sender<Saved>,
-    rx: std::sync::mpsc::Receiver<Result<(), String>>,
+    tx: std::sync::mpsc::Sender<(u64, Saved)>,
+    rx: std::sync::mpsc::Receiver<(u64, Result<(), String>)>,
+    generation: u64,
 }
 impl Writer {
     pub fn start(directory: PathBuf, ctx: eframe::egui::Context) -> Self {
-        let (tx, requests) = std::sync::mpsc::channel::<Saved>();
+        let (tx, requests) = std::sync::mpsc::channel::<(u64, Saved)>();
         let (results, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let store = Store { directory };
@@ -128,17 +129,23 @@ impl Writer {
                 while let Ok(newer) = requests.try_recv() {
                     state = newer;
                 }
-                let result = store.save(&state).map_err(|e| format!("{e:#}"));
-                let _ = results.send(result);
+                let result = store.save(&state.1).map_err(|e| format!("{e:#}"));
+                let _ = results.send((state.0, result));
                 ctx.request_repaint();
             }
         });
-        Self { tx, rx }
+        Self {
+            tx,
+            rx,
+            generation: 0,
+        }
     }
-    pub fn save(&self, state: Saved) {
-        let _ = self.tx.send(state);
+    pub fn save(&mut self, state: Saved) -> u64 {
+        self.generation += 1;
+        let _ = self.tx.send((self.generation, state));
+        self.generation
     }
-    pub fn poll(&self) -> Option<Result<(), String>> {
+    pub fn poll(&self) -> Option<(u64, Result<(), String>)> {
         self.rx.try_recv().ok()
     }
 }

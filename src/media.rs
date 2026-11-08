@@ -8,8 +8,8 @@ pub struct Decoded {
     pub image: egui::ColorImage,
 }
 pub struct Loader {
-    tx: mpsc::Sender<Result<Decoded, (PathBuf,String)>>,
-    rx: mpsc::Receiver<Result<Decoded, (PathBuf,String)>>,
+    tx: mpsc::Sender<Result<Decoded, (PathBuf, String)>>,
+    rx: mpsc::Receiver<Result<Decoded, (PathBuf, String)>>,
 }
 impl Default for Loader {
     fn default() -> Self {
@@ -21,31 +21,56 @@ impl Loader {
     pub fn request(&self, path: &Path, ctx: &egui::Context) {
         let (path, tx, ctx) = (path.to_owned(), self.tx.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let result = decode(&path).map_err(|e| (path.clone(),e.to_string()));
+            let result = decode(&path).map_err(|e| (path.clone(), e.to_string()));
             let _ = tx.send(result);
             ctx.request_repaint();
         });
     }
-    pub fn poll(&self) -> Option<Result<Decoded, (PathBuf,String)>> {
+    pub fn poll(&self) -> Option<Result<Decoded, (PathBuf, String)>> {
         self.rx.try_recv().ok()
     }
 }
-pub fn clipboard_image(directory:&Path)->anyhow::Result<PathBuf>{
-    let mut clipboard=arboard::Clipboard::new()?;
-    let image=clipboard.get_image().map_err(|_|anyhow::anyhow!("The clipboard does not contain an image. Copy a screenshot and try again."))?;
-    anyhow::ensure!(image.width.saturating_mul(image.height)<=16*1024*1024,"Clipboard image exceeds the preview limit");
-    let folder=directory.join("clipboard");std::fs::create_dir_all(&folder)?;
-    let path=folder.join(format!("{}.png",uuid::Uuid::new_v4()));
-    image::save_buffer_with_format(&path,&image.bytes,image.width as u32,image.height as u32,image::ColorType::Rgba8,image::ImageFormat::Png)?;
+pub fn clipboard_image(directory: &Path) -> anyhow::Result<PathBuf> {
+    let mut clipboard = arboard::Clipboard::new()?;
+    let image = clipboard.get_image().map_err(|_| {
+        anyhow::anyhow!("The clipboard does not contain an image. Copy a screenshot and try again.")
+    })?;
+    anyhow::ensure!(
+        image.width.saturating_mul(image.height) <= 16 * 1024 * 1024,
+        "Clipboard image exceeds the preview limit"
+    );
+    let folder = directory.join("clipboard");
+    std::fs::create_dir_all(&folder)?;
+    let path = folder.join(format!("{}.png", uuid::Uuid::new_v4()));
+    image::save_buffer_with_format(
+        &path,
+        &image.bytes,
+        image.width as u32,
+        image.height as u32,
+        image::ColorType::Rgba8,
+        image::ImageFormat::Png,
+    )?;
     Ok(path)
 }
-#[cfg(test)] mod tests {
+#[cfg(test)]
+mod tests {
     use super::*;
-    #[test] fn missing_image_reports_a_recoverable_error(){assert!(decode(Path::new("Z:/this-image-does-not-exist.png")).is_err());}
-    #[test] fn oversized_header_is_rejected_before_allocation(){
-        let directory=std::env::current_dir().unwrap().join(".work/media-tests");std::fs::create_dir_all(&directory).unwrap();
-        let path=directory.join(format!("{}.bmp",uuid::Uuid::new_v4()));
-        let mut bytes=vec![0u8;54];bytes[..2].copy_from_slice(b"BM");bytes[14..18].copy_from_slice(&40u32.to_le_bytes());bytes[18..22].copy_from_slice(&100000u32.to_le_bytes());bytes[22..26].copy_from_slice(&100000u32.to_le_bytes());std::fs::write(&path,bytes).unwrap();assert!(decode(&path).is_err());
+    #[test]
+    fn missing_image_reports_a_recoverable_error() {
+        assert!(decode(Path::new("Z:/this-image-does-not-exist.png")).is_err());
+    }
+    #[test]
+    fn oversized_header_is_rejected_before_allocation() {
+        let directory = std::env::current_dir().unwrap().join(".work/media-tests");
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(format!("{}.bmp", uuid::Uuid::new_v4()));
+        let mut bytes = vec![0u8; 54];
+        bytes[..2].copy_from_slice(b"BM");
+        bytes[14..18].copy_from_slice(&40u32.to_le_bytes());
+        bytes[18..22].copy_from_slice(&100000u32.to_le_bytes());
+        bytes[22..26].copy_from_slice(&100000u32.to_le_bytes());
+        std::fs::write(&path, bytes).unwrap();
+        assert!(decode(&path).is_err());
     }
 }
 pub fn decode(path: &Path) -> anyhow::Result<Decoded> {

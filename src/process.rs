@@ -5,6 +5,17 @@ use std::{
 };
 
 pub const POWERSHELL: &str = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+pub fn canonical_directory(path: &Path) -> Result<PathBuf> {
+    let canonical = path.canonicalize()?;
+    let text = canonical.to_string_lossy();
+    Ok(if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        canonical
+    })
+}
 #[derive(Clone, Debug)]
 pub struct Launch {
     pub program: String,
@@ -95,6 +106,39 @@ pub fn ps_quote(value: &str) -> String {
 pub struct Job(std::os::windows::io::OwnedHandle);
 #[cfg(windows)]
 impl Job {
+    pub fn active(&self) -> Result<u32> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::*;
+        let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
+        anyhow::ensure!(
+            unsafe {
+                QueryInformationJobObject(
+                    self.0.as_raw_handle(),
+                    JobObjectBasicAccountingInformation,
+                    &mut info as *mut _ as *mut _,
+                    std::mem::size_of_val(&info) as u32,
+                    std::ptr::null_mut(),
+                )
+            } != 0,
+            "Query owned processes: {}",
+            std::io::Error::last_os_error()
+        );
+        Ok(info.ActiveProcesses)
+    }
+    pub fn force_stop(&self) -> Result<()> {
+        use std::os::windows::io::AsRawHandle;
+        anyhow::ensure!(
+            unsafe {
+                windows_sys::Win32::System::JobObjects::TerminateJobObject(
+                    self.0.as_raw_handle(),
+                    1,
+                )
+            } != 0,
+            "Stop owned process job: {}",
+            std::io::Error::last_os_error()
+        );
+        Ok(())
+    }
     pub fn new() -> Result<Self> {
         use std::os::windows::io::FromRawHandle;
         use windows_sys::Win32::System::JobObjects::*;
@@ -153,4 +197,16 @@ pub fn child(launch: &Launch) -> std::process::Command {
         command.creation_flags(0x08000000);
     }
     command
+}
+#[cfg(test)]mod tests{
+    use super::*;
+    struct Guard(std::process::Child);impl Drop for Guard{fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
+    #[test]fn stopping_an_owned_job_preserves_an_independent_process(){
+        let dir=std::env::current_dir().unwrap();
+        let launch=tool("powershell",&dir,vec!["-NoProfile".into(),"-Command".into(),"Start-Sleep 60".into()]).unwrap();
+        let mut owned=Guard(child(&launch).spawn().unwrap());let mut independent=Guard(child(&launch).spawn().unwrap());let job=Job::new().unwrap();job.assign(owned.0.id()).unwrap();assert!(job.active().unwrap()>0);job.force_stop().unwrap();
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);while owned.0.try_wait().unwrap().is_none()&&std::time::Instant::now()<deadline{std::thread::sleep(std::time::Duration::from_millis(20));}
+        assert!(owned.0.try_wait().unwrap().is_some());assert!(independent.0.try_wait().unwrap().is_none(),"An independently launched process must remain alive");
+    }
+    #[test]fn powershell_literal_arguments_cannot_escape_single_quotes(){assert_eq!(ps_quote("a' $(whoami) & b"),"a'' $(whoami) & b");}
 }

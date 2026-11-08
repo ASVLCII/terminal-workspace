@@ -1,5 +1,8 @@
 pub mod attachments;
 pub mod bridge;
+pub mod closing;
+pub mod history;
+pub mod instance;
 pub mod layout;
 pub mod media;
 pub mod model;
@@ -7,3 +10,4 @@ pub mod opencode;
 pub mod process;
 pub mod runtime;
 pub mod store;
+pub mod tray;

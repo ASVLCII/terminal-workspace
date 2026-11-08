@@ -21,6 +21,15 @@ pub struct Backend {
     pub plugin: PathBuf,
 }
 impl Backend {
+    pub fn request_shutdown(&mut self) {
+        self.lease.take();
+    }
+    pub fn remaining(&self) -> Result<u32> {
+        self._job.active()
+    }
+    pub fn force_stop(&self) -> Result<()> {
+        self._job.force_stop()
+    }
     pub fn start(bridge: &Bridge, directory: &Path, plugin: &Path) -> Result<Self> {
         let password = uuid::Uuid::new_v4().to_string();
         let mut launch = process::tool(
@@ -98,7 +107,8 @@ impl Backend {
         if response.status() == 204 {
             return Ok(Value::Null);
         }
-        let bytes = response.bytes()?;
+        use std::io::Read;
+        let mut bytes=Vec::new();response.take(8*1024*1024+1).read_to_end(&mut bytes)?;
         anyhow::ensure!(
             bytes.len() <= 8 * 1024 * 1024,
             "OpenCode response too large"

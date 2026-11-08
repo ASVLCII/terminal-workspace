@@ -143,6 +143,9 @@ pub struct TerminalBackend {
 }
 
 impl TerminalBackend {
+    pub fn window_size(&self) -> WindowSize {
+        self.size.into()
+    }
     pub fn new(
         id: u64,
         app_context: egui::Context,
@@ -195,19 +198,23 @@ impl TerminalBackend {
         let _pty_event_loop_thread = pty_event_loop.spawn();
         let _pty_event_subscription = std::thread::Builder::new()
             .name(format!("pty_event_subscription_{}", id))
-            .spawn(move || loop {
-                if let Ok(event) = event_receiver.recv() {
-                    pty_event_proxy_sender
-                        .send((id, event.clone()))
-                        .unwrap_or_else(|_| {
-                            panic!("pty_event_subscription_{}: sending PtyEvent is failed", id)
-                        });
-                    app_context.clone().request_repaint();
+            .spawn(move || {
+                while let Ok(event) = event_receiver.recv() {
                     match event {
-                        Event::Exit => break,
+                        Event::Wakeup => {}
                         Event::PtyWrite(pty) => pty_notifier.notify(pty.into_bytes()),
-                        _ => {}
+                        other => {
+                            let exit = matches!(other, Event::Exit);
+                            if pty_event_proxy_sender.send((id, other)).is_err() {
+                                break;
+                            }
+                            if exit {
+                                app_context.request_repaint();
+                                break;
+                            }
+                        }
                     }
+                    app_context.request_repaint();
                 }
             })?;
 

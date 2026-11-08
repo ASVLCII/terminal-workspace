@@ -22,6 +22,17 @@ fn real_plugin_admission_targets_only_the_bound_same_folder_chat() -> anyhow::Re
     sessions.1.push(a.clone());
     let b = backend.create(&directory)?;
     sessions.1.push(b.clone());
+    let page: terminal_workspace::history::Page = serde_json::from_value(backend.api(
+        reqwest::Method::GET,
+        &terminal_workspace::history::query(&directory, "", None),
+        None,
+    )?)?;
+    assert!(page.data.iter().any(|chat| chat.id == a));
+    let chat = page.data.iter().find(|chat| chat.id == a).unwrap();
+    assert_eq!(
+        chat.location.directory.canonicalize()?,
+        directory.canonicalize()?
+    );
     bridge.bind("terminal-a", &a);
     bridge.bind("terminal-b", &b);
     bridge.stage(&a, &directory.join("Cargo.toml"))?;

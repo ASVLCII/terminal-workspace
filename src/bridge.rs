@@ -26,6 +26,7 @@ pub struct BoundSession {
 }
 #[derive(Default)]
 pub struct State {
+    pub current: HashMap<String, String>,
     pub sessions: HashMap<String, BoundSession>,
     pub server_connected: bool,
     pub tui_loaded: usize,
@@ -103,7 +104,9 @@ impl Bridge {
         &self.token
     }
     pub fn bind(&self, terminal: &str, session: &str) {
-        self.state.lock().unwrap().sessions.insert(
+        let mut state = self.state.lock().unwrap();
+        state.current.insert(terminal.into(), session.into());
+        state.sessions.insert(
             session.into(),
             BoundSession {
                 terminal_id: terminal.into(),
@@ -191,10 +194,31 @@ fn handle(
         }
         "/tui" => {
             let id = data["sessionID"].as_str().context("Missing chat")?;
-            let s = state.sessions.get_mut(id).context("Unregistered chat")?;
-            if data["terminalID"].as_str() != Some(&s.terminal_id) {
+            let terminal = data["terminalID"].as_str().context("Missing terminal")?;
+            if !state.current.contains_key(terminal) {
+                bail!("Unregistered terminal")
+            }
+            if state
+                .sessions
+                .get(id)
+                .is_some_and(|s| s.terminal_id != terminal)
+            {
                 bail!("Chat belongs to another terminal")
             }
+            if let Some(previous) = state.current.insert(terminal.into(), id.into()) {
+                if previous != id {
+                    if let Some(binding) = state.sessions.get_mut(&previous) {
+                        binding.tui_connected = false;
+                    }
+                }
+            }
+            let s = state
+                .sessions
+                .entry(id.into())
+                .or_insert_with(|| BoundSession {
+                    terminal_id: terminal.into(),
+                    ..Default::default()
+                });
             s.tui_connected = true;
             Ok(serde_json::json!({"sessionID":id,"revision":s.revision,"files":s.files}))
         }
@@ -213,6 +237,32 @@ fn handle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn switching_chat_in_a_registered_terminal_reassociates_without_broadcasting() {
+        let bridge = Bridge::start().unwrap();
+        bridge.bind("one", "old");
+        bridge.bind("two", "other");
+        handle(
+            &bridge.state,
+            &Method::Post,
+            "/tui",
+            r#"{"terminalID":"one","sessionID":"new"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            bridge.state.lock().unwrap().sessions["new"].terminal_id,
+            "one"
+        );
+        assert!(
+            handle(
+                &bridge.state,
+                &Method::Post,
+                "/tui",
+                r#"{"terminalID":"one","sessionID":"other"}"#
+            )
+            .is_err()
+        );
+    }
     #[test]
     fn bridge_refuses_unauthenticated_requests() {
         let bridge = Bridge::start().unwrap();
