@@ -1,9 +1,7 @@
 pub mod settings;
 
 use crate::types::Size;
-use alacritty_terminal::event::{
-    Event, EventListener, Notify, OnResize, WindowSize,
-};
+use alacritty_terminal::event::{Event, EventListener, Notify, OnResize, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, Msg, Notifier};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Direction, Line, Point, Side};
@@ -159,7 +157,10 @@ impl TerminalBackend {
             escape_args: true,
             ..tty::Options::default()
         };
-        let config = term::Config { scrolling_history:settings.scrollback, ..Default::default() };
+        let config = term::Config {
+            scrolling_history: settings.scrollback,
+            ..Default::default()
+        };
         let terminal_size = TerminalSize::default();
         let pty = tty::new(&pty_config, terminal_size.into(), id)?;
         #[cfg(not(windows))]
@@ -187,8 +188,7 @@ impl TerminalBackend {
             hovered_hyperlink: None,
         };
         let term = Arc::new(FairMutex::new(term));
-        let pty_event_loop =
-            EventLoop::new(term.clone(), event_proxy, pty, false, false)?;
+        let pty_event_loop = EventLoop::new(term.clone(), event_proxy, pty, false, false)?;
         let notifier = Notifier(pty_event_loop.channel());
         let pty_notifier = Notifier(pty_event_loop.channel());
         let url_regex = RegexSearch::new(r#"(ipfs:|ipns:|magnet:|mailto:|gemini://|gopher://|https://|http://|news:|file://|git://|ssh:|ftp://)[^\u{0000}-\u{001F}\u{007F}-\u{009F}<>"\s{-}\^⟨⟩`]+"#).unwrap();
@@ -230,25 +230,25 @@ impl TerminalBackend {
             BackendCommand::Write(input) => {
                 self.write(input);
                 term.scroll_display(Scroll::Bottom);
-            },
+            }
             BackendCommand::Scroll(delta) => {
                 self.scroll(&mut term, delta);
-            },
+            }
             BackendCommand::Resize(layout_size, font_size) => {
                 self.resize(&mut term, layout_size, font_size);
-            },
+            }
             BackendCommand::SelectStart(selection_type, x, y) => {
                 self.start_selection(&mut term, selection_type, x, y);
-            },
+            }
             BackendCommand::SelectUpdate(x, y) => {
                 self.update_selection(&mut term, x, y);
-            },
+            }
             BackendCommand::ProcessLink(link_action, point) => {
                 self.process_link_action(&term, link_action, point);
-            },
+            }
             BackendCommand::MouseReport(button, modifiers, point, pressed) => {
                 self.process_mouse_report(button, modifiers, point, pressed);
-            },
+            }
         };
     }
 
@@ -281,7 +281,12 @@ impl TerminalBackend {
 
         let cursor = terminal.grid_mut().cursor_cell().clone();
         self.last_content.cells.clear();
-        self.last_content.cells.extend(terminal.grid().display_iter().map(|indexed| VisibleCell {point:indexed.point,cell:indexed.cell.clone()}));
+        self.last_content
+            .cells
+            .extend(terminal.grid().display_iter().map(|indexed| VisibleCell {
+                point: indexed.point,
+                cell: indexed.cell.clone(),
+            }));
         self.last_content.display_offset = terminal.grid().display_offset();
         self.last_content.cursor_point = terminal.grid().cursor.point;
         self.last_content.selectable_range = selectable_range;
@@ -311,24 +316,25 @@ impl TerminalBackend {
     ) {
         match link_action {
             LinkAction::Hover => {
-                self.last_content.hovered_hyperlink = self.regex_match_at(
-                    terminal,
-                    point,
-                    &mut self.url_regex.clone(),
-                );
-            },
+                self.last_content.hovered_hyperlink =
+                    self.regex_match_at(terminal, point, &mut self.url_regex.clone());
+            }
             LinkAction::Clear => {
                 self.last_content.hovered_hyperlink = None;
-            },
+            }
             LinkAction::Open => {
                 self.open_link(terminal);
-            },
+            }
         };
     }
 
-    pub fn take_opened_links(&mut self) -> Vec<String> { std::mem::take(&mut self.opened_links) }
+    pub fn take_opened_links(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.opened_links)
+    }
 
-    pub fn set_scrollback(&mut self, lines: usize) { self.term.lock().grid_mut().update_history(lines); }
+    pub fn set_scrollback(&mut self, lines: usize) {
+        self.term.lock().grid_mut().update_history(lines);
+    }
 
     fn open_link(&mut self, terminal: &Term<EventProxy>) {
         if let Some(range) = &self.last_content.hovered_hyperlink {
@@ -366,20 +372,14 @@ impl TerminalBackend {
         }
 
         match MouseMode::from(self.last_content().terminal_mode) {
-            MouseMode::Sgr => {
-                self.sgr_mouse_report(point, button as u8 + mods, pressed)
-            },
+            MouseMode::Sgr => self.sgr_mouse_report(point, button as u8 + mods, pressed),
             MouseMode::Normal(is_utf8) => {
                 if pressed {
-                    self.normal_mouse_report(
-                        point,
-                        button as u8 + mods,
-                        is_utf8,
-                    )
+                    self.normal_mouse_report(point, button as u8 + mods, is_utf8)
                 } else {
                     self.normal_mouse_report(point, 3 + mods, is_utf8)
                 }
-            },
+            }
         }
     }
 
@@ -436,12 +436,7 @@ impl TerminalBackend {
         x: f32,
         y: f32,
     ) {
-        let location = Self::selection_point(
-            x,
-            y,
-            &self.size,
-            terminal.grid().display_offset(),
-        );
+        let location = Self::selection_point(x, y, &self.size, terminal.grid().display_offset());
         terminal.selection = Some(Selection::new(
             selection_type,
             location,
@@ -449,16 +444,10 @@ impl TerminalBackend {
         ));
     }
 
-    fn update_selection(
-        &mut self,
-        terminal: &mut Term<EventProxy>,
-        x: f32,
-        y: f32,
-    ) {
+    fn update_selection(&mut self, terminal: &mut Term<EventProxy>, x: f32, y: f32) {
         let display_offset = terminal.grid().display_offset();
         if let Some(ref mut selection) = terminal.selection {
-            let location =
-                Self::selection_point(x, y, &self.size, display_offset);
+            let location = Self::selection_point(x, y, &self.size, display_offset);
             selection.update(location, self.selection_side(x));
         }
     }
@@ -474,12 +463,7 @@ impl TerminalBackend {
         }
     }
 
-    fn resize(
-        &mut self,
-        terminal: &mut Term<EventProxy>,
-        layout_size: Size,
-        font_size: Size,
-    ) {
+    fn resize(&mut self, terminal: &mut Term<EventProxy>, layout_size: Size, font_size: Size) {
         if layout_size == self.size.layout_size
             && font_size.width as u16 == self.size.cell_width
             && font_size.height as u16 == self.size.cell_height
@@ -541,8 +525,7 @@ impl TerminalBackend {
         point: Point,
         regex: &mut RegexSearch,
     ) -> Option<Match> {
-        let x = visible_regex_match_iter(terminal, regex)
-            .find(|rm| rm.contains(&point));
+        let x = visible_regex_match_iter(terminal, regex).find(|rm| rm.contains(&point));
         x
     }
 }
@@ -555,8 +538,7 @@ fn visible_regex_match_iter<'a>(
 ) -> impl Iterator<Item = Match> + 'a {
     let viewport_start = Line(-(term.grid().display_offset() as i32));
     let viewport_end = viewport_start + term.bottommost_line();
-    let mut start =
-        term.line_search_left(Point::new(viewport_start, Column(0)));
+    let mut start = term.line_search_left(Point::new(viewport_start, Column(0)));
     let mut end = term.line_search_right(Point::new(viewport_end, Column(0)));
     start.line = start.line.max(viewport_start - 100);
     end.line = end.line.min(viewport_end + 100);
@@ -592,8 +574,16 @@ impl Default for RenderableContent {
     }
 }
 
-pub struct VisibleCell {pub point: Point, pub cell: Cell}
-impl std::ops::Deref for VisibleCell {type Target=Cell;fn deref(&self)->&Cell{&self.cell}}
+pub struct VisibleCell {
+    pub point: Point,
+    pub cell: Cell,
+}
+impl std::ops::Deref for VisibleCell {
+    type Target = Cell;
+    fn deref(&self) -> &Cell {
+        &self.cell
+    }
+}
 
 impl Drop for TerminalBackend {
     fn drop(&mut self) {

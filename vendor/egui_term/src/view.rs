@@ -49,8 +49,7 @@ pub struct TerminalView<'a> {
 
 impl Widget for TerminalView<'_> {
     fn ui(self, ui: &mut egui::Ui) -> Response {
-        let (layout, painter) =
-            ui.allocate_painter(self.size, egui::Sense::click());
+        let (layout, painter) = ui.allocate_painter(self.size, egui::Sense::click());
 
         let widget_id = self.widget_id;
         let mut state = ui.memory(|m| {
@@ -71,11 +70,8 @@ impl Widget for TerminalView<'_> {
 
 impl<'a> TerminalView<'a> {
     pub fn new(ui: &mut egui::Ui, backend: &'a mut TerminalBackend) -> Self {
-        let widget_id = ui.make_persistent_id(format!(
-            "{}{}",
-            EGUI_TERM_WIDGET_ID_PREFIX,
-            backend.id()
-        ));
+        let widget_id =
+            ui.make_persistent_id(format!("{}{}", EGUI_TERM_WIDGET_ID_PREFIX, backend.id()));
 
         Self {
             widget_id,
@@ -113,10 +109,7 @@ impl<'a> TerminalView<'a> {
     }
 
     #[inline]
-    pub fn add_bindings(
-        mut self,
-        bindings: Vec<(Binding<InputKind>, BindingAction)>,
-    ) -> Self {
+    pub fn add_bindings(mut self, bindings: Vec<(Binding<InputKind>, BindingAction)>) -> Self {
         self.bindings_layout.add_bindings(bindings);
         self
     }
@@ -140,11 +133,7 @@ impl<'a> TerminalView<'a> {
         self
     }
 
-    fn process_input(
-        self,
-        layout: &Response,
-        state: &mut TerminalViewState,
-    ) -> Self {
+    fn process_input(self, layout: &Response, state: &mut TerminalViewState) -> Self {
         if !layout.has_focus() {
             return self;
         }
@@ -154,28 +143,31 @@ impl<'a> TerminalView<'a> {
         for event in events {
             let mut input_actions = vec![];
 
-            let keyboard_event = matches!(event, egui::Event::Text(_) | egui::Event::Key {..} | egui::Event::Copy | egui::Event::Paste(_) | egui::Event::Ime(_));
-            if !keyboard_event && !layout.contains_pointer() && !state.is_dragged { continue; }
+            let keyboard_event = matches!(
+                event,
+                egui::Event::Text(_)
+                    | egui::Event::Key { .. }
+                    | egui::Event::Copy
+                    | egui::Event::Paste(_)
+                    | egui::Event::Ime(_)
+            );
+            if !keyboard_event && !layout.contains_pointer() && !state.is_dragged {
+                continue;
+            }
             match event {
                 egui::Event::Text(_)
                 | egui::Event::Key { .. }
                 | egui::Event::Copy
                 | egui::Event::Ime(_)
-                | egui::Event::Paste(_) => {
-                    input_actions.push(process_keyboard_event(
-                        event,
-                        self.backend,
-                        &self.bindings_layout,
-                        modifiers,
-                    ))
-                },
-                egui::Event::MouseWheel { unit, delta, .. } => input_actions
-                    .push(process_mouse_wheel(
-                        state,
-                        self.font.font_type().size,
-                        unit,
-                        delta,
-                    )),
+                | egui::Event::Paste(_) => input_actions.push(process_keyboard_event(
+                    event,
+                    self.backend,
+                    &self.bindings_layout,
+                    modifiers,
+                )),
+                egui::Event::MouseWheel { unit, delta, .. } => input_actions.push(
+                    process_mouse_wheel(state, self.font.font_type().size, unit, delta),
+                ),
                 egui::Event::PointerButton {
                     button,
                     pressed,
@@ -193,27 +185,23 @@ impl<'a> TerminalView<'a> {
                     pressed,
                 )),
                 egui::Event::PointerMoved(pos) => {
-                    input_actions = process_mouse_move(
-                        state,
-                        layout,
-                        self.backend,
-                        pos,
-                        &modifiers,
-                    )
-                },
-                _ => {},
+                    input_actions = process_mouse_move(state, layout, self.backend, pos, &modifiers)
+                }
+                _ => {}
             };
 
             for action in input_actions {
                 match action {
                     InputAction::BackendCall(cmd) => {
                         self.backend.process_command(cmd);
-                    },
+                    }
                     InputAction::WriteToClipboard(data) => {
                         layout.ctx.copy_text(data);
-                    },
-                    InputAction::Ignore => {},
-                    InputAction::RequestPaste => layout.ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+                    }
+                    InputAction::Ignore => {}
+                    InputAction::RequestPaste => layout
+                        .ctx
+                        .send_viewport_cmd(egui::ViewportCommand::RequestPaste),
                 }
             }
         }
@@ -221,19 +209,13 @@ impl<'a> TerminalView<'a> {
         self
     }
 
-    fn show(
-        self,
-        state: &mut TerminalViewState,
-        layout: &Response,
-        painter: &Painter,
-    ) {
+    fn show(self, state: &mut TerminalViewState, layout: &Response, painter: &Painter) {
         let content = self.backend.sync();
         let layout_min = layout.rect.min;
         let layout_max = layout.rect.max;
         let cell_height = content.terminal_size.cell_height as f32;
         let cell_width = content.terminal_size.cell_width as f32;
-        let global_bg =
-            self.theme.get_color(Color::Named(NamedColor::Background));
+        let global_bg = self.theme.get_color(Color::Named(NamedColor::Background));
 
         let mut shapes = vec![Shape::Rect(RectShape::filled(
             Rect::from_min_max(layout_min, layout_max),
@@ -243,30 +225,24 @@ impl<'a> TerminalView<'a> {
 
         for indexed in &content.cells {
             let flags = indexed.cell.flags;
-            let is_wide_char_spacer =
-                flags.contains(cell::Flags::WIDE_CHAR_SPACER);
+            let is_wide_char_spacer = flags.contains(cell::Flags::WIDE_CHAR_SPACER);
             if is_wide_char_spacer {
                 continue;
             }
 
-            let is_app_cursor_mode =
-                content.terminal_mode.contains(TermMode::APP_CURSOR);
+            let is_app_cursor_mode = content.terminal_mode.contains(TermMode::APP_CURSOR);
             let is_wide_char = flags.contains(cell::Flags::WIDE_CHAR);
             let is_inverse = flags.contains(cell::Flags::INVERSE);
-            let is_dim =
-                flags.intersects(cell::Flags::DIM | cell::Flags::DIM_BOLD);
+            let is_dim = flags.intersects(cell::Flags::DIM | cell::Flags::DIM_BOLD);
             let is_selected = content
                 .selectable_range
                 .is_some_and(|r| r.contains(indexed.point));
-            let is_hovered_hyperling =
-                content.hovered_hyperlink.as_ref().is_some_and(|r| {
-                    r.contains(&indexed.point)
-                        && r.contains(&state.current_mouse_position_on_grid)
-                });
+            let is_hovered_hyperling = content.hovered_hyperlink.as_ref().is_some_and(|r| {
+                r.contains(&indexed.point) && r.contains(&state.current_mouse_position_on_grid)
+            });
 
             let x = layout_min.x + (cell_width * indexed.point.column.0 as f32);
-            let line_num =
-                indexed.point.line.0 + content.display_offset as i32;
+            let line_num = indexed.point.line.0 + content.display_offset as i32;
             let y = layout_min.y + (cell_height * line_num as f32);
 
             let mut fg = self.theme.get_color(indexed.fg);
@@ -313,10 +289,7 @@ impl<'a> TerminalView<'a> {
             if content.cursor_point == indexed.point {
                 let cursor_color = self.theme.get_color(content.cursor.fg);
                 shapes.push(Shape::Rect(RectShape::filled(
-                    Rect::from_min_size(
-                        Pos2::new(x, y),
-                        Vec2::new(cell_width, cell_height),
-                    ),
+                    Rect::from_min_size(Pos2::new(x, y), Vec2::new(cell_width, cell_height)),
                     CornerRadius::default(),
                     cursor_color,
                 )));
@@ -324,9 +297,7 @@ impl<'a> TerminalView<'a> {
 
             // Draw text content
             if indexed.c != ' ' && indexed.c != '\t' {
-                if content.cursor_point == indexed.point
-                    && is_app_cursor_mode
-                {
+                if content.cursor_point == indexed.point && is_app_cursor_mode {
                     std::mem::swap(&mut fg, &mut bg);
                 }
 
@@ -357,14 +328,19 @@ fn process_keyboard_event(
     modifiers: Modifiers,
 ) -> InputAction {
     match event {
-        egui::Event::Ime(egui::ImeEvent::Commit(text)) => InputAction::BackendCall(BackendCommand::Write(text.into_bytes())),
-        egui::Event::Text(text) => {
-            process_text_event(&text, modifiers, backend, bindings_layout)
-        },
-        egui::Event::Paste(text) => InputAction::BackendCall(BackendCommand::Write(paste_bytes(&text,backend.last_content().terminal_mode))),
+        egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
+            InputAction::BackendCall(BackendCommand::Write(text.into_bytes()))
+        }
+        egui::Event::Text(text) => process_text_event(&text, modifiers, backend, bindings_layout),
+        egui::Event::Paste(text) => InputAction::BackendCall(BackendCommand::Write(paste_bytes(
+            &text,
+            backend.last_content().terminal_mode,
+        ))),
         egui::Event::Copy => {
             #[cfg(not(any(target_os = "ios", target_os = "macos")))]
-            if modifiers.contains(Modifiers::COMMAND | Modifiers::SHIFT) || !backend.selectable_content().is_empty() {
+            if modifiers.contains(Modifiers::COMMAND | Modifiers::SHIFT)
+                || !backend.selectable_content().is_empty()
+            {
                 let content = backend.selectable_content();
                 InputAction::WriteToClipboard(content)
             } else {
@@ -376,27 +352,23 @@ fn process_keyboard_event(
                 let content = backend.selectable_content();
                 InputAction::WriteToClipboard(content)
             }
-        },
+        }
         egui::Event::Key {
             key,
             pressed,
             modifiers,
             ..
-        } => process_keyboard_key(
-            backend,
-            bindings_layout,
-            key,
-            modifiers,
-            pressed,
-        ),
+        } => process_keyboard_key(backend, bindings_layout, key, modifiers, pressed),
         _ => InputAction::Ignore,
     }
 }
 
 fn paste_bytes(text: &str, mode: TermMode) -> Vec<u8> {
     if mode.contains(TermMode::BRACKETED_PASTE) {
-        format!("\x1b[200~{}\x1b[201~",text.replace('\x1b',"")).into_bytes()
-    } else {text.as_bytes().to_vec()}
+        format!("\x1b[200~{}\x1b[201~", text.replace('\x1b', "")).into_bytes()
+    } else {
+        text.as_bytes().to_vec()
+    }
 }
 
 #[cfg(test)]
@@ -404,11 +376,17 @@ mod workspace_input_tests {
     use super::*;
     #[test]
     fn multiline_clipboard_paste_uses_bracketed_paste_when_negotiated() {
-        assert_eq!(paste_bytes("first\nsecond",TermMode::BRACKETED_PASTE),b"\x1b[200~first\nsecond\x1b[201~");
+        assert_eq!(
+            paste_bytes("first\nsecond", TermMode::BRACKETED_PASTE),
+            b"\x1b[200~first\nsecond\x1b[201~"
+        );
     }
     #[test]
     fn unicode_clipboard_paste_preserves_text_without_sending_ctrl_v() {
-        assert_eq!(paste_bytes("Tiếng Việt",TermMode::empty()),"Tiếng Việt".as_bytes());
+        assert_eq!(
+            paste_bytes("Tiếng Việt", TermMode::empty()),
+            "Tiếng Việt".as_bytes()
+        );
     }
 }
 
@@ -425,16 +403,12 @@ fn process_text_event(
             backend.last_content().terminal_mode,
         ) == BindingAction::Ignore
         {
-            InputAction::BackendCall(BackendCommand::Write(
-                text.as_bytes().to_vec(),
-            ))
+            InputAction::BackendCall(BackendCommand::Write(text.as_bytes().to_vec()))
         } else {
             InputAction::Ignore
         }
     } else {
-        InputAction::BackendCall(BackendCommand::Write(
-            text.as_bytes().to_vec(),
-        ))
+        InputAction::BackendCall(BackendCommand::Write(text.as_bytes().to_vec()))
     }
 }
 
@@ -450,11 +424,8 @@ fn process_keyboard_key(
     }
 
     let terminal_mode = backend.last_content().terminal_mode;
-    let binding_action = bindings_layout.get_action(
-        InputKind::KeyCode(key),
-        modifiers,
-        terminal_mode,
-    );
+    let binding_action =
+        bindings_layout.get_action(InputKind::KeyCode(key), modifiers, terminal_mode);
 
     match binding_action {
         BindingAction::Copy => InputAction::WriteToClipboard(backend.selectable_content()),
@@ -462,13 +433,11 @@ fn process_keyboard_key(
         BindingAction::Char(c) => {
             let mut buf = [0, 0, 0, 0];
             let str = c.encode_utf8(&mut buf);
-            InputAction::BackendCall(BackendCommand::Write(
-                str.as_bytes().to_vec(),
-            ))
-        },
-        BindingAction::Esc(seq) => InputAction::BackendCall(
-            BackendCommand::Write(seq.as_bytes().to_vec()),
-        ),
+            InputAction::BackendCall(BackendCommand::Write(str.as_bytes().to_vec()))
+        }
+        BindingAction::Esc(seq) => {
+            InputAction::BackendCall(BackendCommand::Write(seq.as_bytes().to_vec()))
+        }
         _ => InputAction::Ignore,
     }
 }
@@ -483,7 +452,7 @@ fn process_mouse_wheel(
         MouseWheelUnit::Line => {
             let lines = delta.y.signum() * delta.y.abs().ceil();
             InputAction::BackendCall(BackendCommand::Scroll(lines as i32))
-        },
+        }
         MouseWheelUnit::Point => {
             state.scroll_pixels -= delta.y;
             let lines = (state.scroll_pixels / font_size).trunc();
@@ -493,7 +462,7 @@ fn process_mouse_wheel(
             } else {
                 InputAction::Ignore
             }
-        },
+        }
         MouseWheelUnit::Page => InputAction::Ignore,
     }
 }
@@ -532,14 +501,34 @@ fn process_left_button(
     pressed: bool,
 ) -> InputAction {
     let terminal_mode = backend.last_content().terminal_mode;
-    let image_link = backend.last_content().hovered_hyperlink.as_ref().is_some_and(|range| {
-        let text:String=backend.last_content().cells.iter().filter(|cell|range.contains(&cell.point)).map(|cell|cell.c).collect();
-        let lower=text.to_ascii_lowercase();
-        lower.starts_with("file://") && [".png",".jpg",".jpeg",".webp",".gif",".bmp"].iter().any(|ext|lower.ends_with(ext))
-    });
+    let image_link = backend
+        .last_content()
+        .hovered_hyperlink
+        .as_ref()
+        .is_some_and(|range| {
+            let text: String = backend
+                .last_content()
+                .cells
+                .iter()
+                .filter(|cell| range.contains(&cell.point))
+                .map(|cell| cell.c)
+                .collect();
+            let lower = text.to_ascii_lowercase();
+            lower.starts_with("file://")
+                && [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"]
+                    .iter()
+                    .any(|ext| lower.ends_with(ext))
+        });
     if image_link && !modifiers.shift {
-        state.is_dragged=false;
-        return if pressed {InputAction::Ignore}else{InputAction::BackendCall(BackendCommand::ProcessLink(LinkAction::Open,state.current_mouse_position_on_grid))};
+        state.is_dragged = false;
+        return if pressed {
+            InputAction::Ignore
+        } else {
+            InputAction::BackendCall(BackendCommand::ProcessLink(
+                LinkAction::Open,
+                state.current_mouse_position_on_grid,
+            ))
+        };
     }
     if terminal_mode.intersects(TermMode::MOUSE_MODE) {
         InputAction::BackendCall(BackendCommand::MouseReport(
@@ -551,14 +540,7 @@ fn process_left_button(
     } else if pressed {
         process_left_button_pressed(state, layout, position)
     } else {
-        process_left_button_released(
-            state,
-            layout,
-            backend,
-            bindings_layout,
-            position,
-            modifiers,
-        )
+        process_left_button_released(state, layout, backend, bindings_layout, position, modifiers)
     }
 }
 
@@ -601,10 +583,7 @@ fn process_left_button_released(
     }
 }
 
-fn build_start_select_command(
-    layout: &Response,
-    cursor_position: Pos2,
-) -> BackendCommand {
+fn build_start_select_command(layout: &Response, cursor_position: Pos2) -> BackendCommand {
     let selection_type = if layout.double_clicked() {
         SelectionType::Semantic
     } else if layout.triple_clicked() {
@@ -641,9 +620,7 @@ fn process_mouse_move(
     // Handle command or selection update based on terminal mode and modifiers
     if state.is_dragged {
         let terminal_mode = terminal_content.terminal_mode;
-        let cmd = if terminal_mode.contains(TermMode::MOUSE_MOTION)
-            && modifiers.is_none()
-        {
+        let cmd = if terminal_mode.contains(TermMode::MOUSE_MOTION) && modifiers.is_none() {
             InputAction::BackendCall(BackendCommand::MouseReport(
                 MouseButton::LeftMove,
                 *modifiers,
@@ -651,9 +628,7 @@ fn process_mouse_move(
                 true,
             ))
         } else {
-            InputAction::BackendCall(BackendCommand::SelectUpdate(
-                cursor_x, cursor_y,
-            ))
+            InputAction::BackendCall(BackendCommand::SelectUpdate(cursor_x, cursor_y))
         };
 
         actions.push(cmd);
