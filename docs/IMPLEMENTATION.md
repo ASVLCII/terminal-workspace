@@ -39,17 +39,18 @@ Private bytes, release build, this PC (Intel Iris Xe), without trimming:
 
 - Initial default backend: empty window peak 281.78 MiB (fails 200 MiB), four shells + 1920×1080 RGB PNG peak 316.10 MiB (passes 350 MiB).
 - Controlled backend comparison using the same executable: DirectX 12 empty window 117.32 MiB; Vulkan 255.57 MiB. These are diagnostic short samples, not the final workload acceptance numbers.
-- Windows now defaults to wgpu DirectX 12 and memory-oriented allocation. Full workloads must be repeated against the final build, including the installed system fonts. Hosted CLI/backend and GPU memory are separate metrics.
+- Current release executable SHA-256: `10b19aebab831c343aa95aa698a1befd17aef77aa82f0f1ff10fd57694c4e998`. DirectX 12, CaskaydiaMono NFM 14 pt, 10,000 lines, 12-second warm-up and 12 samples: empty peak **162.30 MiB**, four PowerShell panes plus the 1920×1080 image peak **204.82 MiB**. Both app-only budgets pass.
+- Separate final-sample four-shell figures: hosted processes **242.90 MiB** private bytes, total process tree **447.73 MiB**; GPU **97.86 MiB shared**, **0 dedicated**. Empty GPU allocation: **93.79 MiB shared**. GPU counters are allocation observations, not private-byte budget inputs. No working-set trimming. Retained-growth and representative OpenCode workload gates remain below.
 
 Detailed local test artifacts are under artifacts/ (ignored to avoid committing generated transcripts/media payloads). scripts/benchmark.py creates isolated data and records private-byte workloads; --benchmark-workload is an explicit test mode and never runs on ordinary reopening.
 
 ## Remaining release gates
 
-- Final release workloads and retained-growth/output cycles; GPU accounting and representative OpenCode application-tree measurement.
-- Final installer install/upgrade/uninstall preservation test and complete third-party notice audit before external distribution.
+- Retained-growth/output cycles and representative OpenCode application-tree measurement. The two specified release RAM workloads and separate GPU counter capture passed.
+- Complete third-party notice audit before external distribution. Current unsigned NSIS installer passed install/upgrade/uninstall: payload and Start-menu shortcut removed, application data and unknown added files retained.
 - Full keyboard/mouse reporting/modifier matrix, physical Vietnamese IME composition, Unicode/space paths, keyboard-only flows, Windows scaling/high contrast and long-label comparisons against all four boards.
 - Codex interactive compatibility check; Claude Code on a machine where it is installed. Claude is not installed here and must not be silently installed by this app.
-- Deliberate no-tray/save/shutdown failure paths, interrupted pane dragging, and final independent code review.
+- Deliberate no-tray/save/shutdown failure paths and interrupted pane dragging. Independent source review completed with its reported lifecycle/persistence issues corrected and re-reviewed; native delayed-startup quit regression passed on both debug and the packaged release source build.
 
 ## Architecture rulings
 
@@ -60,3 +61,10 @@ Detailed local test artifacts are under artifacts/ (ignored to avoid committing 
 - A narrow Apache-licensed Alacritty Windows adaptation assigns ConPTY children to their job while suspended, before resuming them, and closes the primary-thread handle. The stdio backend uses the same suspend/assign/resume ordering.
 - Only visible terminal cells are copied for rendering; complete history grids are never cloned per frame. Repaint wakeups are coalesced by egui rather than queued through the application event channel.
 - DirectX 12 is the Windows default because measured Vulkan fixed overhead misses the agreed idle budget on this PC. WGPU_BACKEND remains a diagnostic override.
+
+## Current local artifacts
+
+- `dist/app/terminal-workspace.exe`: standalone development application with adjacent bundled plugin.
+- `dist/TerminalWorkspace-0.1.0-dev-x64-setup.exe`: unsigned per-user development installer; SHA-256 `7a078ae837c86aa0c90f30c9a429265eec9b81d04104d93a08e4e3d121e7caee`.
+- Repeatable checks: `scripts/design-verification.py`, `scripts/desktop-font-zoom.py`, `scripts/desktop-quit-startup.py release`, `scripts/benchmark.py`, `scripts/installer-smoke.py`. The desktop checks run sequentially in an interactive Windows session; each uses isolated app-owned data/processes.
+- Clippy completed with advisory style warnings; it is not reported warning-free.
