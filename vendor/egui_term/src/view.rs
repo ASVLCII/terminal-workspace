@@ -115,7 +115,28 @@ impl<'a> TerminalView<'a> {
     }
 
     fn focus(self, layout: &Response) -> Self {
-        if self.has_focus {
+        if self.has_focus || layout.clicked() {
+            let content = self.backend.last_content();
+            let size = content.terminal_size;
+            let position = layout.rect.min
+                + egui::vec2(
+                    content.cursor_point.column.0 as f32 * size.cell_width as f32,
+                    (content.cursor_point.line.0 + content.display_offset as i32).max(0) as f32
+                        * size.cell_height as f32,
+                );
+            layout.ctx.output_mut(|output| {
+                output.ime = Some(egui::output::IMEOutput {
+                    purpose: egui::IMEPurpose::Normal,
+                    should_interrupt_composition: false,
+                    rect: layout.rect,
+                    cursor_rect: egui::Rect::from_min_size(
+                        position,
+                        egui::vec2(2., size.cell_height as f32),
+                    ),
+                })
+            });
+        }
+        if self.has_focus || layout.clicked() {
             layout.request_focus();
         } else {
             layout.surrender_focus();
@@ -309,7 +330,7 @@ impl<'a> TerminalView<'a> {
                             y,
                         },
                         Align2::CENTER_TOP,
-                        indexed.c,
+                        cell_text(&indexed.cell),
                         self.font.font_type(),
                         fg,
                     )
@@ -321,6 +342,27 @@ impl<'a> TerminalView<'a> {
     }
 }
 
+fn cell_text(cell: &cell::Cell) -> String {
+    let mut text = cell.c.to_string();
+    if let Some(marks) = cell.zerowidth() {
+        text.extend(marks);
+    }
+    text
+}
+#[cfg(test)]
+mod combining_tests {
+    use super::*;
+    #[test]
+    fn decomposed_vietnamese_marks_remain_attached_to_the_base_glyph() {
+        let mut value = cell::Cell {
+            c: 'a',
+            ..Default::default()
+        };
+        value.push_zerowidth('\u{0306}');
+        value.push_zerowidth('\u{0301}');
+        assert_eq!(cell_text(&value), "a\u{0306}\u{0301}");
+    }
+}
 fn process_keyboard_event(
     event: egui::Event,
     backend: &TerminalBackend,

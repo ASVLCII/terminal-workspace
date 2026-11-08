@@ -8,23 +8,40 @@ pub struct Decoded {
     pub image: egui::ColorImage,
 }
 pub struct Loader {
+    requests: mpsc::SyncSender<(PathBuf, egui::Context)>,
     tx: mpsc::Sender<Result<Decoded, (PathBuf, String)>>,
     rx: mpsc::Receiver<Result<Decoded, (PathBuf, String)>>,
 }
 impl Default for Loader {
     fn default() -> Self {
         let (tx, rx) = mpsc::channel();
-        Self { tx, rx }
+        let (requests, queue) = mpsc::sync_channel::<(PathBuf, egui::Context)>(2);
+        let results = tx.clone();
+        std::thread::spawn(move || {
+            while let Ok((path, ctx)) = queue.recv() {
+                let result = decode(&path).map_err(|e| (path.clone(), e.to_string()));
+                if results.send(result).is_err() {
+                    break;
+                }
+                ctx.request_repaint();
+            }
+        });
+        Self { tx, rx, requests }
     }
 }
 impl Loader {
     pub fn request(&self, path: &Path, ctx: &egui::Context) {
-        let (path, tx, ctx) = (path.to_owned(), self.tx.clone(), ctx.clone());
-        std::thread::spawn(move || {
-            let result = decode(&path).map_err(|e| (path.clone(), e.to_string()));
-            let _ = tx.send(result);
+        if self
+            .requests
+            .try_send((path.to_owned(), ctx.clone()))
+            .is_err()
+        {
+            let _ = self.tx.send(Err((
+                path.to_owned(),
+                "Image loading is busy. Try this preview again.".into(),
+            )));
             ctx.request_repaint();
-        });
+        }
     }
     pub fn poll(&self) -> Option<Result<Decoded, (PathBuf, String)>> {
         self.rx.try_recv().ok()

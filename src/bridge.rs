@@ -31,6 +31,7 @@ pub struct State {
     pub server_connected: bool,
     pub tui_loaded: usize,
     pub error: Option<String>,
+    pub images: HashMap<String, Vec<String>>,
 }
 pub struct Bridge {
     pub url: String,
@@ -102,6 +103,15 @@ impl Bridge {
     }
     pub fn token(&self) -> &str {
         &self.token
+    }
+    pub fn forget(&self, terminal: &str) {
+        let mut state = self.state.lock().unwrap();
+        state.current.remove(terminal);
+        state
+            .sessions
+            .retain(|_, binding| binding.terminal_id != terminal);
+        let chats: std::collections::HashSet<_> = state.sessions.keys().cloned().collect();
+        state.images.retain(|chat, _| chats.contains(chat));
     }
     pub fn bind(&self, terminal: &str, session: &str) {
         let mut state = self.state.lock().unwrap();
@@ -186,10 +196,38 @@ fn handle(
             } else {
                 state.server_connected = true;
             }
-            Ok(serde_json::json!({"version":1}))
+            Ok(
+                serde_json::json!({"version":1,"capabilities":["exact-chat","staged-references","image-references","acknowledgements"]}),
+            )
         }
         "/plugin-error" => {
             state.error = data["message"].as_str().map(String::from);
+            Ok(serde_json::json!({"ok":true}))
+        }
+        "/image" => {
+            let id = data["sessionID"].as_str().context("Missing chat")?;
+            anyhow::ensure!(state.sessions.contains_key(id), "Unregistered chat");
+            let uri = data["uri"].as_str().context("Missing image URI")?;
+            let url = url::Url::parse(uri)?;
+            let local = url
+                .to_file_path()
+                .map_err(|_| anyhow::anyhow!("Preview references must be local files"))?;
+            let extension = local
+                .extension()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_ascii_lowercase();
+            anyhow::ensure!(
+                ["png", "jpg", "jpeg", "gif", "webp", "bmp"].contains(&extension.as_str()),
+                "Unsupported image type"
+            );
+            let images = state.images.entry(id.into()).or_default();
+            if !images.iter().any(|image| image == uri) {
+                if images.len() >= 128 {
+                    images.remove(0);
+                }
+                images.push(uri.into());
+            }
             Ok(serde_json::json!({"ok":true}))
         }
         "/tui" => {

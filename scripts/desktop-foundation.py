@@ -9,7 +9,7 @@ artifacts.mkdir(exist_ok=True)
 marker = root / '.work' / 'keyboard-away-from-pointer.txt'
 if marker.exists():
     marker.unlink()
-process = subprocess.Popen([str(root/'target/debug/terminal-workspace.exe')], cwd=root, creationflags=subprocess.CREATE_NO_WINDOW)
+process = subprocess.Popen([str(root/'target/debug/terminal-workspace.exe'),'--foundation'], cwd=root, creationflags=subprocess.CREATE_NO_WINDOW)
 try:
     window = Desktop(backend='win32').window(process=process.pid, title_re='Terminal Workspace.*')
     window.wait('visible', timeout=25)

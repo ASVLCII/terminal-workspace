@@ -7,7 +7,7 @@ shutil.copyfile(root/'docs/design/01-workspace-and-layouts-v2.png',fixture)
 report=root/'artifacts/foundation-preview.json'
 if report.exists():report.unlink()
 log=open(root/'artifacts/desktop-image.stderr','w')
-process=subprocess.Popen([str(root/'target/debug/terminal-workspace.exe')],cwd=root,creationflags=subprocess.CREATE_NO_WINDOW,stdout=log,stderr=log)
+process=subprocess.Popen([str(root/'target/debug/terminal-workspace.exe'),'--foundation'],cwd=root,creationflags=subprocess.CREATE_NO_WINDOW,stdout=log,stderr=log)
 try:
     window=Desktop(backend='win32').window(process=process.pid,title_re='Terminal Workspace.*');window.wait('visible',timeout=25);window=window.wrapper_object();window.set_focus();time.sleep(1)
     rect=window.rectangle();mouse.click(coords=(rect.left+170,rect.top+220))

@@ -146,6 +146,20 @@ impl TerminalBackend {
     pub fn window_size(&self) -> WindowSize {
         self.size.into()
     }
+    pub fn default_color(&self, index: usize) -> alacritty_terminal::vte::ansi::Rgb {
+        use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
+        let color = crate::TerminalTheme::default().get_color(match index {
+            256 => Color::Named(NamedColor::Foreground),
+            257 => Color::Named(NamedColor::Background),
+            258 => Color::Named(NamedColor::Cursor),
+            _ => Color::Indexed(index.min(255) as u8),
+        });
+        Rgb {
+            r: color.r(),
+            g: color.g(),
+            b: color.b(),
+        }
+    }
     pub fn new(
         id: u64,
         app_context: egui::Context,
@@ -153,6 +167,8 @@ impl TerminalBackend {
         settings: BackendSettings,
     ) -> Result<Self> {
         let pty_config = tty::Options {
+            #[cfg(windows)]
+            job_object: settings.job_object,
             shell: Some(tty::Shell::new(settings.shell, settings.args)),
             working_directory: settings.working_directory,
             env: settings.env,

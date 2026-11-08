@@ -9,6 +9,8 @@ pub struct BackendSettings {
     pub working_directory: Option<PathBuf>,
     pub env: std::collections::HashMap<String, String>,
     pub scrollback: usize,
+    #[cfg(windows)]
+    pub job_object: Option<usize>,
 }
 
 impl Default for BackendSettings {
@@ -19,6 +21,8 @@ impl Default for BackendSettings {
             working_directory: None,
             env: Default::default(),
             scrollback: 10_000,
+            #[cfg(windows)]
+            job_object: None,
         }
     }
 }

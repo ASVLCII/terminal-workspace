@@ -82,8 +82,87 @@ fn read(path: &std::path::Path) -> Result<Saved> {
         std::fs::metadata(path)?.len() <= 8 * 1024 * 1024,
         "Saved state is too large"
     );
-    let state: Saved = serde_json::from_slice(&std::fs::read(path)?)?;
+    let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
+    if let Some(workspaces) = raw["workspaces"].as_array() {
+        for workspace in workspaces {
+            anyhow::ensure!(
+                workspace["dock"]["focused_surface"]
+                    .as_u64()
+                    .is_none_or(|surface| surface == 0),
+                "Invalid focused surface"
+            );
+        }
+    }
+    let state: Saved = serde_json::from_value(raw)?;
     anyhow::ensure!(state.version == 1, "Unsupported saved-state version");
+    anyhow::ensure!(
+        state.settings.font_size.is_finite()
+            && (10.0..=28.0).contains(&state.settings.font_size)
+            && (1000..=50000).contains(&state.settings.scrollback),
+        "Invalid terminal settings"
+    );
+    let mut workspace_ids = std::collections::HashSet::new();
+    let mut terminal_ids = std::collections::HashSet::new();
+    for workspace in &state.workspaces {
+        anyhow::ensure!(
+            workspace_ids.insert(&workspace.id) && workspace.directory.is_absolute(),
+            "Invalid or duplicate workspace"
+        );
+        let mut local_ids = std::collections::HashSet::new();
+        for terminal in &workspace.terminals {
+            anyhow::ensure!(
+                terminal_ids.insert(&terminal.id) && terminal.directory.is_absolute(),
+                "Invalid or duplicate terminal identity"
+            );
+            local_ids.insert(&terminal.id);
+        }
+        anyhow::ensure!(
+            workspace.dock.surfaces_count() == 1,
+            "Detached layout surfaces are unsupported"
+        );
+        let tree = workspace.dock.main_surface();
+        let nodes: Vec<_> = tree.iter().collect();
+        if let Some(focused) = tree.focused_leaf() {
+            anyhow::ensure!(
+                focused.0 < nodes.len() && nodes[focused.0].is_leaf(),
+                "Invalid focused pane"
+            );
+        }
+        let mut panes = std::collections::HashSet::new();
+        for (index, node) in nodes.iter().enumerate() {
+            match node {
+                egui_dock::Node::Horizontal(split) | egui_dock::Node::Vertical(split) => {
+                    anyhow::ensure!(
+                        split.fraction.is_finite() && split.fraction > 0. && split.fraction < 1.,
+                        "Invalid pane proportion"
+                    );
+                    let index = egui_dock::NodeIndex(index);
+                    anyhow::ensure!(
+                        [index.left().0, index.right().0]
+                            .into_iter()
+                            .all(|child| child < nodes.len() && !nodes[child].is_empty()),
+                        "Invalid pane tree"
+                    );
+                }
+                egui_dock::Node::Leaf(leaf) => {
+                    anyhow::ensure!(
+                        leaf.tabs.is_empty() || leaf.active.0 < leaf.tabs.len(),
+                        "Invalid active tab"
+                    );
+                    for pane in &leaf.tabs {
+                        anyhow::ensure!(panes.insert(pane), "Duplicate pane");
+                        if let crate::model::Pane::Terminal(id) = pane {
+                            anyhow::ensure!(
+                                local_ids.contains(id),
+                                "Pane references an unknown terminal"
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     Ok(state)
 }
 fn replace(source: &std::path::Path, destination: &std::path::Path) -> Result<()> {
@@ -153,6 +232,51 @@ impl Writer {
 mod tests {
     use super::*;
     use crate::model::Workspace;
+    #[test]
+    fn invalid_split_is_rejected_instead_of_restoring_a_broken_layout() {
+        let store = store();
+        let mut state = Saved::default();
+        let mut workspace = Workspace::new("Broken".into(), "Z:/project".into());
+        workspace.dock = crate::layout::preset(
+            vec![crate::model::Pane::Settings, crate::model::Pane::History],
+            crate::layout::Preset::Columns,
+        );
+        if let egui_dock::Node::Horizontal(split) =
+            &mut workspace.dock.main_surface_mut()[egui_dock::NodeIndex::root()]
+        {
+            split.fraction = 2.;
+        }
+        state.workspaces.push(workspace);
+        std::fs::create_dir_all(&store.directory).unwrap();
+        std::fs::write(
+            store.directory.join("state.json"),
+            serde_json::to_vec(&state).unwrap(),
+        )
+        .unwrap();
+        assert!(store.load().is_err());
+    }
+    #[test]
+    fn duplicate_terminal_identity_is_rejected_before_any_process_can_start() {
+        let store = store();
+        let mut state = Saved::default();
+        let mut workspace = Workspace::new("Broken".into(), "Z:/project".into());
+        let definition = crate::model::TerminalDefinition {
+            id: "duplicate".into(),
+            name: "Shell".into(),
+            tool: crate::model::Tool::PowerShell,
+            directory: "Z:/project".into(),
+            chat: None,
+        };
+        workspace.terminals = vec![definition.clone(), definition];
+        state.workspaces.push(workspace);
+        std::fs::create_dir_all(&store.directory).unwrap();
+        std::fs::write(
+            store.directory.join("state.json"),
+            serde_json::to_vec(&state).unwrap(),
+        )
+        .unwrap();
+        assert!(store.load().is_err());
+    }
     fn store() -> Store {
         Store {
             directory: std::env::current_dir()

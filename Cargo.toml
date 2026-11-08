@@ -24,7 +24,7 @@ tray-icon = "0.24"
 crossbeam-channel = "0.5"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Console", "Win32_Security", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_Security", "Win32_Storage_FileSystem"] }
 
 [profile.release]
 lto = "thin"
@@ -32,3 +32,7 @@ strip = true
 
 [workspace]
 members = ["vendor/egui_term"]
+exclude = ["vendor/alacritty_terminal"]
+
+[patch.crates-io]
+alacritty_terminal = { path = "vendor/alacritty_terminal" }

@@ -170,11 +170,13 @@ impl Manager {
                     }
                 };
                 let numeric_id = serial.fetch_add(1, Ordering::Relaxed);
+                let job = Job::new()?;
                 let terminal = TerminalBackend::new(
                     numeric_id,
                     ctx.clone(),
                     event_tx,
                     BackendSettings {
+                        job_object: Some(job.raw()),
                         shell: launch.program,
                         args: launch.args,
                         working_directory: Some(launch.directory),
@@ -182,8 +184,6 @@ impl Manager {
                         scrollback,
                     },
                 )?;
-                let job = Job::new()?;
-                job.assign(terminal.pty_id())?;
                 Ok(Terminal {
                     backend: terminal,
                     life: Life::Running,
@@ -215,11 +215,12 @@ impl Manager {
                         }
                     }
                     PtyEvent::ClipboardStore(_, text) => ctx.copy_text(text),
-                    PtyEvent::ColorRequest(_, format) => {
+                    PtyEvent::ColorRequest(index, format) => {
+                        let color = terminal.backend.default_color(index);
                         terminal
                             .backend
                             .process_command(egui_term::BackendCommand::Write(
-                                format(Default::default()).into_bytes(),
+                                format(color).into_bytes(),
                             ))
                     }
                     PtyEvent::TextAreaSizeRequest(format) => {
@@ -264,6 +265,19 @@ impl Manager {
             }
         });
     }
+    pub fn stop_terminal(&mut self, id: &str) {
+        if let Some(terminal) = self.terminals.get_mut(id) {
+            terminal.life = Life::Stopping;
+            terminal
+                .backend
+                .process_command(egui_term::BackendCommand::Write(vec![3]));
+            if matches!(terminal.definition.tool, Tool::PowerShell | Tool::Custom(_)) {
+                terminal
+                    .backend
+                    .process_command(egui_term::BackendCommand::Write(b"exit\r".to_vec()));
+            }
+        }
+    }
     pub fn remaining(&self) -> anyhow::Result<usize> {
         let mut count = 0;
         for t in self.terminals.values() {
@@ -284,8 +298,8 @@ impl Manager {
         }
         let backend = self
             .backend
-            .lock()
-            .map_err(|_| anyhow::anyhow!("OpenCode worker failed"))?;
+            .try_lock()
+            .map_err(|_| anyhow::anyhow!("OpenCode is still starting or handling a request. Wait for it to finish, then try quitting again."))?;
         if let Some(backend) = backend.as_ref() {
             backend.force_stop()?;
         }

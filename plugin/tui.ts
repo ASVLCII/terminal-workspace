@@ -10,8 +10,10 @@ export default Plugin.define({
     await fetch(`${endpoint}/plugin`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({version:1,kind:'tui',terminalID})});
     let revision = -1;
     let stopped = false;
+    let pending = false;
     const poll = async () => {
-      if(stopped) return;
+      if(stopped || pending) return;
+      pending=true;
       try {
         const route = ctx.ui.router.current();
         if(route.type !== 'session') return;
@@ -27,7 +29,7 @@ export default Plugin.define({
         revision=batch.revision;
       } catch (error) {
         await fetch(`${endpoint}/plugin-error`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({message:String(error)})}).catch(()=>{});
-      }
+      } finally {pending=false;}
     };
     await poll();
     const timer = setInterval(poll,500);

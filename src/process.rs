@@ -106,6 +106,10 @@ pub fn ps_quote(value: &str) -> String {
 pub struct Job(std::os::windows::io::OwnedHandle);
 #[cfg(windows)]
 impl Job {
+    pub fn raw(&self) -> usize {
+        use std::os::windows::io::AsRawHandle;
+        self.0.as_raw_handle() as usize
+    }
     pub fn active(&self) -> Result<u32> {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::System::JobObjects::*;
@@ -198,15 +202,128 @@ pub fn child(launch: &Launch) -> std::process::Command {
     }
     command
 }
-#[cfg(test)]mod tests{
-    use super::*;
-    struct Guard(std::process::Child);impl Drop for Guard{fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
-    #[test]fn stopping_an_owned_job_preserves_an_independent_process(){
-        let dir=std::env::current_dir().unwrap();
-        let launch=tool("powershell",&dir,vec!["-NoProfile".into(),"-Command".into(),"Start-Sleep 60".into()]).unwrap();
-        let mut owned=Guard(child(&launch).spawn().unwrap());let mut independent=Guard(child(&launch).spawn().unwrap());let job=Job::new().unwrap();job.assign(owned.0.id()).unwrap();assert!(job.active().unwrap()>0);job.force_stop().unwrap();
-        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);while owned.0.try_wait().unwrap().is_none()&&std::time::Instant::now()<deadline{std::thread::sleep(std::time::Duration::from_millis(20));}
-        assert!(owned.0.try_wait().unwrap().is_some());assert!(independent.0.try_wait().unwrap().is_none(),"An independently launched process must remain alive");
+pub fn spawn_in_job(command: &mut std::process::Command, job: &Job) -> Result<std::process::Child> {
+    use std::os::windows::{
+        io::{FromRawHandle, OwnedHandle},
+        process::CommandExt,
+    };
+    use windows_sys::Win32::{
+        Foundation::*,
+        System::{Diagnostics::ToolHelp::*, Threading::*},
+    };
+    command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+    let mut child = command.spawn()?;
+    let result = (|| -> Result<()> {
+        job.assign(child.id())?;
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        anyhow::ensure!(
+            snapshot != INVALID_HANDLE_VALUE,
+            "Inspect suspended child: {}",
+            std::io::Error::last_os_error()
+        );
+        let _snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot) };
+        let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+        entry.dwSize = std::mem::size_of_val(&entry) as u32;
+        let mut valid = unsafe { Thread32First(snapshot, &mut entry) };
+        while valid != 0 {
+            if entry.th32OwnerProcessID == child.id() {
+                let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+                anyhow::ensure!(
+                    !thread.is_null(),
+                    "Open suspended child thread: {}",
+                    std::io::Error::last_os_error()
+                );
+                let _thread = unsafe { OwnedHandle::from_raw_handle(thread) };
+                anyhow::ensure!(
+                    unsafe { ResumeThread(thread) } != u32::MAX,
+                    "Resume owned child: {}",
+                    std::io::Error::last_os_error()
+                );
+                return Ok(());
+            }
+            valid = unsafe { Thread32Next(snapshot, &mut entry) };
+        }
+        anyhow::bail!("Suspended child thread was unavailable")
+    })();
+    if let Err(error) = result {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
     }
-    #[test]fn powershell_literal_arguments_cannot_escape_single_quotes(){assert_eq!(ps_quote("a' $(whoami) & b"),"a'' $(whoami) & b");}
+    Ok(child)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    struct Guard(std::process::Child);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    #[test]
+    fn stopping_an_owned_job_preserves_an_independent_process() {
+        let dir = std::env::current_dir().unwrap();
+        let launch = tool(
+            "powershell",
+            &dir,
+            vec![
+                "-NoProfile".into(),
+                "-Command".into(),
+                "Start-Sleep 60".into(),
+            ],
+        )
+        .unwrap();
+        let mut owned = Guard(child(&launch).spawn().unwrap());
+        let mut independent = Guard(child(&launch).spawn().unwrap());
+        let job = Job::new().unwrap();
+        job.assign(owned.0.id()).unwrap();
+        assert!(job.active().unwrap() > 0);
+        job.force_stop().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while owned.0.try_wait().unwrap().is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(owned.0.try_wait().unwrap().is_some());
+        assert!(
+            independent.0.try_wait().unwrap().is_none(),
+            "An independently launched process must remain alive"
+        );
+    }
+    #[test]
+    fn powershell_literal_arguments_cannot_escape_single_quotes() {
+        assert_eq!(ps_quote("a' $(whoami) & b"), "a'' $(whoami) & b");
+    }
+    #[test]
+    fn conpty_assigns_ownership_before_fast_descendants_can_start() {
+        let job = Job::new().unwrap();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let script = format!(
+            "Start-Process -WindowStyle Hidden -FilePath '{}' -ArgumentList '-NoProfile -Command Start-Sleep 60'; Start-Sleep 60",
+            POWERSHELL
+        );
+        let terminal = egui_term::TerminalBackend::new(
+            77,
+            eframe::egui::Context::default(),
+            tx,
+            egui_term::BackendSettings {
+                shell: POWERSHELL.into(),
+                args: vec!["-NoProfile".into(), "-Command".into(), script],
+                job_object: Some(job.raw()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while job.active().unwrap() < 2 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+        assert!(
+            job.active().unwrap() >= 2,
+            "A fast child must inherit the terminal’s job"
+        );
+        job.force_stop().unwrap();
+        drop(terminal);
+    }
 }

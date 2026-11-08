@@ -18,9 +18,13 @@ export default Plugin.define({
       return result.json();
     };
     await call('/plugin', {version:1,kind:'server',opencode:ctx.app.version});
+    const admitted = new Map<string,number>();
+    const acknowledgements = new Map<string,number>();
+    const retry = setInterval(async () => {for(const [sessionID,revision] of acknowledgements){try{await call('/ack',{sessionID,revision});if(acknowledgements.get(sessionID)===revision)acknowledgements.delete(sessionID);}catch{}}},1000);
     const hook = await ctx.session.hook('prompt', async event => {
       const batch = await call(`/stage/${encodeURIComponent(event.sessionID)}`);
-      preparePrompt(event,batch);
+      for(const file of batch.files){if(/^file:/i.test(file.uri)&&/\.(png|jpe?g|gif|webp|bmp)$/i.test(file.uri)){await call('/image',{sessionID:event.sessionID,uri:file.uri});}}
+      preparePrompt(event,batch,admitted.get(event.sessionID) ?? 0);
     });
     const abort = new AbortController();
     const events = (async () => {
@@ -29,10 +33,13 @@ export default Plugin.define({
         if (item.type !== 'user') continue;
         const revision = item.payload.metadata?.terminalWorkspace?.revision;
         if (typeof revision === 'number') {
-          await call('/ack',{sessionID:event.data.sessionID,revision});
+          const sessionID=event.data.sessionID;
+          admitted.set(sessionID,Math.max(admitted.get(sessionID) ?? 0,revision));
+          acknowledgements.set(sessionID,Math.max(acknowledgements.get(sessionID) ?? 0,revision));
+          await call('/ack',{sessionID,revision}).then(()=>{if(acknowledgements.get(sessionID)===revision)acknowledgements.delete(sessionID);}).catch(()=>{});
         }
       }
     })().catch(() => {});
-    return async () => { abort.abort(); await hook.dispose(); await events; };
+    return async () => { clearInterval(retry);abort.abort(); await hook.dispose(); await events; };
   },
 });

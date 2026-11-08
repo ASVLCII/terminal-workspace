@@ -23,7 +23,9 @@ enum Action {
     Maximize(Pane),
     Close(Pane),
     Attach(String, Vec<PathBuf>),
-    PickedFolder(PathBuf),
+    PickedFolder(String, PathBuf),
+    WorkspaceReady(String, String, PathBuf),
+    FormError(String, String),
     Preview(PathBuf),
     Screenshot(String),
     Error(String),
@@ -31,6 +33,8 @@ enum Action {
     Resume(terminal_workspace::history::Chat),
 }
 struct Form {
+    id: String,
+    validating: bool,
     name: String,
     folder: String,
     command: String,
@@ -65,6 +69,8 @@ pub struct App {
     starting: HashSet<String>,
     failures: HashMap<String, String>,
     focus: Option<String>,
+    focus_request:Option<String>,
+    terminal_widgets:HashMap<String,egui::Id>,
     maximized: Option<Pane>,
     media: media::Loader,
     images: HashMap<PathBuf, Preview>,
@@ -89,6 +95,8 @@ pub struct App {
     shutdown_started: Option<Instant>,
     global_pane: Option<Pane>,
     close_seen: bool,
+    terminal_question: Option<String>,
+    terminal_stopping: Option<(String, Instant)>,
 }
 impl App {
     pub fn new(
@@ -96,6 +104,7 @@ impl App {
         instance: terminal_workspace::instance::Instance,
     ) -> anyhow::Result<Self> {
         style(&cc.egui_ctx);
+        crate::fonts::install(&cc.egui_ctx);
         let store = Store::user()?;
         let (saved, load_error, error) = match store.load() {
             Ok((s, recovered)) => (
@@ -128,7 +137,7 @@ impl App {
             Ok(tray) => Some(tray),
             Err(_) => None,
         };
-        Ok(Self {
+        let mut app = Self {
             saved,
             writer,
             runtime,
@@ -142,6 +151,7 @@ impl App {
             starting: HashSet::new(),
             failures: HashMap::new(),
             focus: None,
+            focus_request:None,terminal_widgets:HashMap::new(),
             maximized: None,
             media: Default::default(),
             images: HashMap::new(),
@@ -166,11 +176,41 @@ impl App {
             shutdown_started: None,
             global_pane: None,
             close_seen: false,
-        })
+            terminal_question: None,
+            terminal_stopping: None,
+        };
+        if std::env::args().any(|a| a == "--benchmark-workload") {
+            anyhow::ensure!(
+                std::env::var_os("TERMINAL_WORKSPACE_DATA_DIR").is_some()
+                    && app.saved.workspaces.is_empty(),
+                "Benchmark requires an explicitly isolated empty data directory"
+            );
+            let workspace = Workspace::new("Memory workload".into(), std::env::current_dir()?);
+            app.saved.selected = Some(workspace.id.clone());
+            app.saved.workspaces.push(workspace);
+            for _ in 0..4 {
+                app.add_terminal(Tool::PowerShell, &cc.egui_ctx);
+            }
+            let panes = app.saved.workspaces[0]
+                .dock
+                .iter_all_tabs()
+                .map(|(_, p)| p.clone())
+                .collect();
+            app.saved.workspaces[0].dock = layout::preset(panes, Preset::Grid);
+            if let Some(path) = std::env::var_os("TERMINAL_WORKSPACE_BENCH_IMAGE") {
+                app.saved.workspaces[0].dock.main_surface_mut().split_right(
+                    egui_dock::NodeIndex::root(),
+                    0.74,
+                    vec![Pane::Image(path.into())],
+                );
+            }
+        }
+        Ok(app)
     }
     fn choose_close(&mut self, choice: terminal_workspace::closing::Choice, ctx: &egui::Context) {
         use terminal_workspace::closing::{self, Choice};
         if choice == Choice::Cancel {
+            self.focus_request=self.focus.clone();
             self.close = false;
             self.remember = false;
             self.explicit_quit = false;
@@ -190,6 +230,7 @@ impl App {
         }
         self.close = false;
         self.remember = false;
+        if choice==Choice::Background{self.focus_request=self.focus.clone();}
         self.saved_action = Some(choice);
         let generation = self.writer.save(self.saved.clone());
         self.save_gate.wait(generation);
@@ -198,6 +239,47 @@ impl App {
     }
     fn close_ui(&mut self, ctx: &egui::Context) {
         use terminal_workspace::closing::Choice;
+        if let Some(id) = self.terminal_question.clone() {
+            let name = self
+                .definition(&id)
+                .map(|d| d.name.clone())
+                .unwrap_or("terminal".into());
+            let (mut cancel, mut stop) = (false, false);
+            let response=egui::Modal::new(egui::Id::new("stop-terminal")).show(ctx,|ui|{ui.set_width(420.);ui.heading(format!("Stop {name}?"));ui.label("This ends this terminal and its owned processes. Other terminals keep running.");ui.add_space(20.);ui.horizontal(|ui|{cancel=ui.button("Cancel").clicked();stop=ui.button("Stop terminal").clicked();});});
+            if cancel || response.should_close() {
+                self.terminal_question = None;
+            }
+            if stop {
+                self.terminal_question = None;
+                self.runtime.stop_terminal(&id);
+                self.terminal_stopping = Some((id, Instant::now()));
+            }
+        }
+        if let Some((id, since)) = self.terminal_stopping.clone() {
+            if since.elapsed() > Duration::from_secs(5) {
+                let (mut force, mut cancel) = (false, false);
+                egui::Modal::new(egui::Id::new("force-terminal")).show(ctx, |ui| {
+                    ui.set_width(420.);
+                    ui.heading("This terminal is still running");
+                    ui.label("Normal shutdown has not finished.");
+                    ui.horizontal(|ui| {
+                        cancel = ui.button("Keep terminal").clicked();
+                        force = ui.button("Force stop terminal").clicked();
+                    });
+                });
+                if cancel {
+                    self.terminal_stopping = None;
+                }
+                if force {
+                    if let Some(t) = self.runtime.terminals.get(&id) {
+                        if let Err(e) = t.job.force_stop() {
+                            self.error = Some(format!("{e:#}"));
+                            self.terminal_stopping = None;
+                        }
+                    }
+                }
+            }
+        }
         if !self.close {
             self.close_seen = false;
         }
@@ -319,25 +401,35 @@ impl App {
     }
     fn add_terminal(&mut self, tool: Tool, ctx: &egui::Context) {
         if let Some(i) = self.index() {
+            self.add_terminal_at(tool, self.saved.workspaces[i].directory.clone(), ctx);
+        }
+    }
+    fn add_terminal_at(&mut self, tool: Tool, directory: PathBuf, ctx: &egui::Context) {
+        if let Some(i) = self.index() {
             let w = &mut self.saved.workspaces[i];
             let id = uuid::Uuid::new_v4().to_string();
             let def = TerminalDefinition {
                 id: id.clone(),
                 name: tool.label().into(),
                 tool,
-                directory: w.directory.clone(),
+                directory,
                 chat: None,
             };
             w.terminals.push(def.clone());
             w.dock.push_to_focused_leaf(Pane::Terminal(id.clone()));
             self.starting.insert(id.clone());
-            self.focus = Some(id);
+            self.focus_request=Some(id.clone());self.focus = Some(id);
             self.runtime.spawn(def, ctx, self.saved.settings.scrollback);
             self.changed();
         }
     }
     fn picker(&self, recipient: Option<String>, folder: bool, ctx: &egui::Context) {
         let tx = self.tx.clone();
+        let form_id = self
+            .form
+            .as_ref()
+            .map(|form| form.id.clone())
+            .unwrap_or_default();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let dialog = rfd::FileDialog::new();
@@ -350,7 +442,7 @@ impl App {
                 let action = if let Some(id) = recipient {
                     Action::Attach(id, paths)
                 } else {
-                    Action::PickedFolder(paths[0].clone())
+                    Action::PickedFolder(form_id, paths[0].clone())
                 };
                 let _ = tx.send(action);
                 ctx.request_repaint();
@@ -369,6 +461,7 @@ impl App {
                 dock.push_to_focused_leaf(pane.clone());
             }
             if let Pane::Terminal(id) = pane {
+                self.focus_request=Some(id.clone());
                 self.focus = Some(id);
             }
             self.changed();
@@ -386,6 +479,8 @@ impl App {
             match action {
                 Action::NewWorkspace => {
                     self.form = Some(Form {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        validating: false,
                         name: String::new(),
                         folder: String::new(),
                         command: String::new(),
@@ -394,32 +489,66 @@ impl App {
                     })
                 }
                 Action::CreateWorkspace => {
-                    if let Some(form) = self.form.as_ref() {
-                        let folder = PathBuf::from(&form.folder);
-                        if !folder.is_absolute() || !folder.is_dir() {
-                            self.form.as_mut().unwrap().error =
-                                "Choose an existing absolute project folder.".into();
+                    if let Some(form) = self.form.as_mut() {
+                        if form.validating {
                             continue;
                         }
-                        let name = if form.name.trim().is_empty() {
-                            folder
+                        form.validating = true;
+                        let (id, name, folder) = (
+                            form.id.clone(),
+                            form.name.clone(),
+                            PathBuf::from(&form.folder),
+                        );
+                        let tx = self.tx.clone();
+                        let ctx = ctx.clone();
+                        std::thread::spawn(move || {
+                            let result = (|| -> anyhow::Result<PathBuf> {
+                                anyhow::ensure!(
+                                    folder.is_absolute() && folder.is_dir(),
+                                    "Choose an existing absolute project folder."
+                                );
+                                terminal_workspace::process::canonical_directory(&folder)
+                            })();
+                            let action = match result {
+                                Ok(directory) => Action::WorkspaceReady(id, name, directory),
+                                Err(error) => Action::FormError(id, format!("{error:#}")),
+                            };
+                            let _ = tx.send(action);
+                            ctx.request_repaint();
+                        });
+                    }
+                }
+                Action::WorkspaceReady(id, name, directory) => {
+                    if self.form.as_ref().is_some_and(|form| form.id == id) {
+                        let name = if name.trim().is_empty() {
+                            directory
                                 .file_name()
-                                .unwrap_or_default()
+                                .unwrap_or(directory.as_os_str())
                                 .to_string_lossy()
                                 .into()
                         } else {
-                            form.name.trim().into()
+                            name.trim().into()
                         };
-                        let w = Workspace::new(name, folder);
-                        self.saved.selected = Some(w.id.clone());
-                        self.saved.workspaces.push(w);
+                        let workspace = Workspace::new(name, directory);
+                        self.saved.selected = Some(workspace.id.clone());
+                        self.saved.workspaces.push(workspace);
                         self.form = None;
                         self.add_terminal(Tool::PowerShell, ctx);
+                    }
+                }
+                Action::FormError(id, error) => {
+                    if let Some(form) = self.form.as_mut() {
+                        if form.id == id {
+                            form.validating = false;
+                            form.error = error;
+                        }
                     }
                 }
                 Action::NewTerminal(Tool::Custom(command)) if command.is_empty() => {
                     if let Some(i) = self.index() {
                         self.form = Some(Form {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            validating: false,
                             name: "Custom command".into(),
                             folder: self.saved.workspaces[i].directory.to_string_lossy().into(),
                             command: String::new(),
@@ -506,6 +635,7 @@ impl App {
                     }
                 }
                 Action::Maximize(pane) => {
+                    if let Pane::Terminal(id)=&pane{self.focus_request=Some(id.clone());}
                     self.maximized = if self.maximized.as_ref() == Some(&pane) {
                         None
                     } else {
@@ -518,12 +648,13 @@ impl App {
                             .runtime
                             .terminals
                             .get(id)
-                            .is_some_and(|t| t.life == Life::Running)
+                            .is_some_and(|t| t.job.active().unwrap_or(1) > 0)
                         {
-                            self.error=Some("This terminal is running. Stop its program first, or use Stop and close to end the app’s terminals.".into());
+                            self.terminal_question = Some(id.clone());
                             continue;
                         }
                         self.runtime.terminals.remove(id);
+                        self.runtime.bridge.forget(id);
                     }
                     if let Some(i) = self.index() {
                         let w = &mut self.saved.workspaces[i];
@@ -553,9 +684,11 @@ impl App {
                         ctx.request_repaint();
                     });
                 }
-                Action::PickedFolder(path) => {
+                Action::PickedFolder(id, path) => {
                     if let Some(form) = self.form.as_mut() {
-                        form.folder = path.to_string_lossy().into()
+                        if form.id == id {
+                            form.folder = path.to_string_lossy().into();
+                        }
                     }
                 }
                 Action::Preview(path) => {
@@ -597,7 +730,7 @@ impl App {
         w.terminals.push(def.clone());
         w.dock.push_to_focused_leaf(Pane::Terminal(id.clone()));
         self.starting.insert(id.clone());
-        self.focus = Some(id);
+        self.focus_request=Some(id.clone());self.focus = Some(id);
         self.runtime.spawn(def, ctx, self.saved.settings.scrollback);
         self.changed();
     }
@@ -743,6 +876,33 @@ impl App {
             });
         });
         if let Some(chat) = self.definition(id).and_then(|d| d.chat.as_ref()).cloned() {
+            let images = self
+                .runtime
+                .bridge
+                .state
+                .lock()
+                .unwrap()
+                .images
+                .get(&chat)
+                .cloned()
+                .unwrap_or_default();
+            if !images.is_empty() {
+                ui.menu_button("Images", |ui| {
+                    for uri in images {
+                        if let Ok(url) = url::Url::parse(&uri) {
+                            if let Ok(path) = url.to_file_path() {
+                                if ui
+                                    .button(path.file_name().unwrap_or_default().to_string_lossy())
+                                    .clicked()
+                                {
+                                    self.actions.push(Action::Preview(path));
+                                    ui.close();
+                                }
+                            }
+                        }
+                    }
+                });
+            }
             let files = self.runtime.bridge.files(&chat);
             if !files.is_empty() {
                 ui.horizontal_wrapped(|ui| {
@@ -764,7 +924,8 @@ impl App {
         }
         if let Some(terminal) = self.runtime.terminals.get_mut(id) {
             let size = ui.available_size();
-            let focused = self.focus.as_deref() == Some(id)
+            let current_focus=ui.memory(|memory|memory.focused());
+            let focused = (self.focus_request.as_deref()==Some(id)||current_focus.is_some_and(|focus|self.terminal_widgets.get(id)==Some(&focus)))
                 && self.form.is_none()
                 && !self.close
                 && self.error.is_none()
@@ -772,6 +933,7 @@ impl App {
                 && self.saved_action.is_none()
                 && !self.shutdown_waiting
                 && self.shutdown_started.is_none();
+            let focused=focused&&self.terminal_question.is_none()&&self.terminal_stopping.is_none();
             let view = egui_term::TerminalView::new(ui, &mut terminal.backend)
                 .set_focus(focused)
                 .set_size(size)
@@ -779,8 +941,11 @@ impl App {
                     font_type: egui::FontId::monospace(self.saved.settings.font_size),
                 }));
             let response = ui.add(view);
+            self.terminal_widgets.insert(id.into(),response.id);
+            if focused&&self.focus_request.as_deref()==Some(id){self.focus_request=None;}
             if response.clicked() {
                 self.focus = Some(id.into());
+                self.focus_request=Some(id.into());ui.ctx().request_repaint();
             }
             if response.hovered() {
                 let files = ui.ctx().input(|i| i.raw.dropped_files.clone());
@@ -857,6 +1022,11 @@ impl App {
                 )
                 .changed();
             if changed {
+                for terminal in self.runtime.terminals.values_mut() {
+                    terminal
+                        .backend
+                        .set_scrollback(self.saved.settings.scrollback);
+                }
                 self.changed();
             }
             ui.add_space(24.);
@@ -865,13 +1035,20 @@ impl App {
                 ("New workspace", "Ctrl+Shift+N"),
                 ("New terminal", "Ctrl+Shift+T"),
                 ("Settings", "Ctrl+,"),
+                ("Paste screenshot", "Ctrl+Shift+I"),
                 ("Restore pane", "Escape"),
             ] {
                 ui.add_space(10.);
                 ui.horizontal(|ui| {
                     ui.label(name);
                     ui.add_space(30.);
-                    ui.monospace(key);
+                    egui::Frame::new()
+                        .stroke(egui::Stroke::new(1., Color32::from_gray(65)))
+                        .inner_margin(egui::Margin::symmetric(7, 4))
+                        .corner_radius(4)
+                        .show(ui, |ui| {
+                            ui.monospace(key);
+                        });
                 });
                 ui.add_space(10.);
                 ui.separator();
@@ -951,6 +1128,9 @@ impl App {
                 ui.text_edit_singleline(&mut form.folder);
                 browse = ui.button("Browse…").clicked();
             });
+            if form.validating {
+                ui.spinner();
+            }
             if !form.error.is_empty() {
                 ui.colored_label(Color32::LIGHT_RED, &form.error);
             }
@@ -958,11 +1138,14 @@ impl App {
             ui.horizontal(|ui| {
                 cancel = ui.button("Cancel").clicked();
                 create = ui
-                    .button(if form.custom {
-                        "Open terminal"
-                    } else {
-                        "Create workspace"
-                    })
+                    .add_enabled(
+                        !form.validating,
+                        egui::Button::new(if form.custom {
+                            "Open terminal"
+                        } else {
+                            "Create workspace"
+                        }),
+                    )
                     .clicked();
             });
         });
@@ -975,7 +1158,11 @@ impl App {
             if self.form.as_ref().unwrap().custom {
                 let form = self.form.take().unwrap();
                 if !form.command.trim().is_empty() {
-                    self.add_terminal(Tool::Custom(form.command), ctx);
+                    self.add_terminal_at(
+                        Tool::Custom(form.command),
+                        PathBuf::from(form.folder),
+                        ctx,
+                    );
                 }
             } else {
                 self.actions.push(Action::CreateWorkspace);
@@ -1047,6 +1234,19 @@ impl eframe::App for App {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         self.runtime.events(&ctx);
+        if let Some((id, _)) = self.terminal_stopping.clone() {
+            if self
+                .runtime
+                .terminals
+                .get(&id)
+                .is_none_or(|t| t.job.active().unwrap_or(1) == 0)
+            {
+                self.terminal_stopping = None;
+                self.actions.push(Action::Close(Pane::Terminal(id)));
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+        }
         let associations = self.runtime.bridge.state.lock().unwrap().current.clone();
         let mut association_changed = false;
         for workspace in &mut self.saved.workspaces {

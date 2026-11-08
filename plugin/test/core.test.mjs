@@ -15,3 +15,9 @@ test('same-directory different session is not changed', () => {
   preparePrompt(event,{sessionID:'a',revision:1,files:[{uri:'file:///layout.png'}]});
   assert.deepEqual(event,{sessionID:'b',messageID:'m2',prompt:{text:'untouched'}});
 });
+
+test('durably admitted references are not repeated while acknowledgement is retried', () => {
+ const event={sessionID:'a',prompt:{text:'second prompt'}};
+ preparePrompt(event,{sessionID:'a',revision:2,files:[{uri:'file:///old',revision:1},{uri:'file:///new',revision:2}]},1);
+ assert.deepEqual(event.prompt.files,[{uri:'file:///new'}]);
+});

@@ -55,13 +55,14 @@ impl Backend {
             ("TERMINAL_WORKSPACE_TOKEN".into(), bridge.token().into()),
         ]);
         let job = Job::new()?;
-        let mut child = process::child(&launch)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .context("Start OpenCode backend")?;
-        job.assign(child.id())?;
+        let mut child = process::spawn_in_job(
+            process::child(&launch)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null()),
+            &job,
+        )
+        .context("Start OpenCode backend")?;
         let stdout = child.stdout.take().context("Backend stdout missing")?;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -108,7 +109,8 @@ impl Backend {
             return Ok(Value::Null);
         }
         use std::io::Read;
-        let mut bytes=Vec::new();response.take(8*1024*1024+1).read_to_end(&mut bytes)?;
+        let mut bytes = Vec::new();
+        response.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
         anyhow::ensure!(
             bytes.len() <= 8 * 1024 * 1024,
             "OpenCode response too large"

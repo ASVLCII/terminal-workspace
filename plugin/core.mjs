@@ -1,8 +1,9 @@
-export function preparePrompt(event, batch) {
+export function preparePrompt(event, batch, admittedRevision = 0) {
   if (!batch || batch.sessionID !== event.sessionID || !batch.files.length) return event;
   const existing = event.prompt.files ?? [];
   event.prompt.files = [...existing];
   for (const file of batch.files) {
+    if ((file.revision ?? batch.revision) <= admittedRevision) continue;
     if (!event.prompt.files.some(current => current.uri === file.uri)) {
       event.prompt.files.push({uri:file.uri});
     }
