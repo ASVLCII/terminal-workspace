@@ -3,3 +3,7 @@ pub mod bridge;
 pub mod process;
 pub mod opencode;
 pub mod media;
+pub mod model;
+pub mod store;
+pub mod runtime;
+pub mod layout;
