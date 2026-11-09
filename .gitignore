@@ -6,3 +6,4 @@
 /plugin/node_modules/
 *.log
 /scripts/__pycache__/
+/.playwright-cli/

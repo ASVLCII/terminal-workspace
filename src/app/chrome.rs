@@ -1,10 +1,14 @@
 use super::*;
 use crate::icons::{self, Icon};
 use egui::{Align, FontId, Frame, Layout, Margin, Sense, Stroke};
-const MUTED: Color32 = Color32::from_rgb(170, 170, 176);
-const LINE: Color32 = Color32::from_rgb(58, 58, 62);
-const CHROME: Color32 = Color32::from_rgb(31, 31, 33);
-const FG: Color32 = Color32::from_rgb(237, 237, 237);
+pub(super) const MUTED: Color32 = Color32::from_rgb(158, 161, 171);
+pub(super) const LINE: Color32 = Color32::from_rgb(48, 50, 56);
+pub(super) const CHROME: Color32 = Color32::from_rgb(26, 27, 30);
+pub(super) const SIDEBAR: Color32 = Color32::from_rgb(24, 25, 28);
+pub(super) const CANVAS: Color32 = Color32::from_rgb(21, 21, 22);
+pub(super) const SELECTED: Color32 = Color32::from_rgb(45, 47, 54);
+pub(super) const HOVER: Color32 = Color32::from_rgb(36, 38, 43);
+pub(super) const FG: Color32 = Color32::from_rgb(232, 233, 237);
 fn flat(ui: &mut egui::Ui) {
     ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
@@ -17,7 +21,7 @@ fn primary(label: &str) -> egui::Button<'_> {
 }
 fn section(ui: &mut egui::Ui, name: &str) {
     ui.add_space(24.);
-    ui.label(RichText::new(name).size(17.).strong());
+    ui.label(RichText::new(name).size(14.).strong());
     ui.add_space(12.);
 }
 fn field_label(ui: &mut egui::Ui, label: &str, width: f32) {
@@ -27,7 +31,7 @@ fn field_label(ui: &mut egui::Ui, label: &str, width: f32) {
         rect.left_center(),
         egui::Align2::LEFT_CENTER,
         label,
-        FontId::proportional(14.),
+        FontId::proportional(13.),
         FG,
     );
 }
@@ -36,7 +40,7 @@ impl App {
         Frame::NONE
             .inner_margin(Margin::symmetric(24, 22))
             .show(ui, |ui| {
-                ui.label(RichText::new("Past chats").size(24.).strong());
+                ui.label(RichText::new("Past chats").size(22.).strong());
                 ui.add_space(18.);
                 if let Some(index) = self.index() {
                     let current = self.saved.workspaces[index].id.clone();
@@ -159,7 +163,7 @@ impl App {
                                 );
                                 let mut title = egui::text::LayoutJob::simple(
                                     chat.title.clone().unwrap_or("Untitled chat".into()),
-                                    FontId::proportional(14.),
+                                    FontId::proportional(13.),
                                     FG,
                                     (rect.width() - 170.).max(40.),
                                 );
@@ -506,7 +510,7 @@ impl App {
         }
         let mut job = egui::text::LayoutJob::simple(
             self.pane_name(pane),
-            FontId::proportional(14.),
+            FontId::proportional(13.),
             FG,
             (right - r.left() - 40.).max(20.),
         );
@@ -528,13 +532,13 @@ impl App {
     }
     pub(super) fn workspace_chrome(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("footer")
-            .exact_size(42.)
+            .exact_size(36.)
             .frame(Frame::NONE.fill(CHROME).stroke(Stroke::new(1., LINE)))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.;
                     let (rect, response) =
-                        ui.allocate_exact_size(egui::vec2(self.sidebar_width, 40.), Sense::click());
+                        ui.allocate_exact_size(egui::vec2(self.sidebar_width, 34.), Sense::click());
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Settings")
                     });
@@ -554,7 +558,7 @@ impl App {
                         egui::pos2(rect.left() + 44., rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         "Settings",
-                        FontId::proportional(14.),
+                        FontId::proportional(13.),
                         FG,
                     );
                     ui.painter()
@@ -590,20 +594,16 @@ impl App {
         let sidebar = egui::Panel::left("sidebar")
             .default_size(272.)
             .size_range(220.0..=380.0)
-            .frame(
-                Frame::NONE
-                    .fill(Color32::from_rgb(29, 29, 31))
-                    .stroke(Stroke::new(1., LINE)),
-            )
+            .frame(Frame::NONE.fill(SIDEBAR).stroke(Stroke::new(1., LINE)))
             .show(ui, |ui| {
                 Frame::NONE
-                    .inner_margin(Margin::symmetric(14, 14))
+                    .inner_margin(Margin::symmetric(12, 12))
                     .show(ui, |ui| {
                         Frame::new()
-                            .fill(Color32::from_rgb(37, 37, 39))
-                            .stroke(Stroke::new(1., Color32::from_gray(63)))
+                            .fill(CHROME)
+                            .stroke(Stroke::new(1., LINE))
                             .corner_radius(4)
-                            .inner_margin(Margin::symmetric(10, 6))
+                            .inner_margin(Margin::symmetric(10, 4))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     icons::inline(ui, Icon::Search, MUTED);
@@ -633,8 +633,8 @@ impl App {
                                 }
                             });
                         });
-                        ui.add_space(18.);
-                        ui.label(RichText::new("Workspaces").color(MUTED));
+                        ui.add_space(16.);
+                        ui.label(RichText::new("Workspaces").size(12.).color(MUTED));
                         ui.add_space(6.);
                         let search = self.navigation_search.to_lowercase();
                         let mut projects: std::collections::BTreeMap<
@@ -708,7 +708,7 @@ impl App {
                                         egui::pos2(rect.left() + 46., rect.center().y),
                                         egui::Align2::LEFT_CENTER,
                                         &name,
-                                        FontId::proportional(14.),
+                                        FontId::proportional(13.),
                                         FG,
                                     );
                                     if response
@@ -734,11 +734,7 @@ impl App {
                                                     ui.painter().rect_filled(
                                                         rect,
                                                         4.,
-                                                        Color32::from_gray(if active {
-                                                            48
-                                                        } else {
-                                                            38
-                                                        }),
+                                                        if active { SELECTED } else { HOVER },
                                                     );
                                                 }
                                                 icons::paint(
@@ -769,7 +765,7 @@ impl App {
                                                     egui::pos2(rect.left() + 46., rect.center().y),
                                                     egui::Align2::LEFT_CENTER,
                                                     &workspace.name,
-                                                    FontId::proportional(14.),
+                                                    FontId::proportional(13.),
                                                     FG,
                                                 );
                                                 if response.clicked() {
@@ -789,7 +785,7 @@ impl App {
                                                                 .allocate_exact_size(
                                                                     egui::vec2(
                                                                         ui.available_width(),
-                                                                        48.,
+                                                                        44.,
                                                                     ),
                                                                     Sense::click(),
                                                                 );
@@ -800,11 +796,11 @@ impl App {
                                                                 ui.painter().rect_filled(
                                                                     rect,
                                                                     4.,
-                                                                    Color32::from_gray(if chosen {
-                                                                        64
+                                                                    if chosen {
+                                                                        SELECTED
                                                                     } else {
-                                                                        39
-                                                                    }),
+                                                                        HOVER
+                                                                    },
                                                                 );
                                                             }
                                                             icons::paint(
@@ -833,7 +829,7 @@ impl App {
                                                             let mut title =
                                                                 egui::text::LayoutJob::simple(
                                                                     terminal.name.clone(),
-                                                                    FontId::proportional(14.),
+                                                                    FontId::proportional(13.),
                                                                     FG,
                                                                     text_rect.width(),
                                                                 );
@@ -863,7 +859,7 @@ impl App {
                                                             ui.painter().circle_filled(
                                                                 egui::pos2(
                                                                     rect.left() + 37.,
-                                                                    rect.top() + 35.,
+                                                                    rect.top() + 32.,
                                                                 ),
                                                                 3.,
                                                                 color,
@@ -871,7 +867,7 @@ impl App {
                                                             ui.painter().text(
                                                                 egui::pos2(
                                                                     rect.left() + 47.,
-                                                                    rect.top() + 35.,
+                                                                    rect.top() + 32.,
                                                                 ),
                                                                 egui::Align2::LEFT_CENTER,
                                                                 status,
@@ -899,7 +895,7 @@ impl App {
                         ui.separator();
                         ui.add_space(10.);
                         ui.horizontal(|ui| {
-                            ui.label("Past chats");
+                            ui.label(RichText::new("Past chats").size(12.).color(MUTED));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if ui.small_button("View all").clicked() {
                                     self.actions.push(Action::Focus(Pane::History));
@@ -952,12 +948,12 @@ impl App {
             });
         self.sidebar_width = sidebar.response.rect.width();
         egui::Panel::top("toolbar")
-            .exact_size(54.)
+            .exact_size(44.)
             .frame(
                 Frame::NONE
                     .fill(CHROME)
                     .stroke(Stroke::new(1., LINE))
-                    .inner_margin(Margin::symmetric(16, 9)),
+                    .inner_margin(Margin::symmetric(16, 5)),
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -968,9 +964,9 @@ impl App {
                             .file_name()
                             .unwrap_or_default()
                             .to_string_lossy();
-                        ui.label(RichText::new(project).size(17.).strong());
-                        ui.label(RichText::new("/").size(17.).color(MUTED));
-                        ui.label(RichText::new(&workspace.name).size(17.).strong());
+                        ui.label(RichText::new(project).size(13.).color(MUTED));
+                        ui.label(RichText::new("/").size(13.).color(MUTED));
+                        ui.label(RichText::new(&workspace.name).size(13.).strong());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if icons::button(ui, Icon::Image, "Open image preview").clicked() {
                                 self.pick_preview(ui.ctx());
@@ -1184,7 +1180,7 @@ impl App {
     }
     pub(super) fn maximized_header(&mut self, ui: &mut egui::Ui, pane: &Pane) {
         Frame::NONE
-            .fill(Color32::from_gray(36))
+            .fill(CHROME)
             .inner_margin(Margin::symmetric(10, 2))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -1215,10 +1211,10 @@ impl App {
     pub(super) fn settings_surface(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             Frame::NONE
-                .inner_margin(Margin::symmetric(30, 24))
+                .inner_margin(Margin::symmetric(32, 28))
                 .show(ui, |ui| {
                     ui.set_max_width(720.);
-                    ui.label(RichText::new("Settings").size(26.).strong());
+                    ui.label(RichText::new("Settings").size(22.).strong());
                     ui.add_space(14.);
                     ui.separator();
                     section(ui, "Terminal");
@@ -1363,7 +1359,7 @@ impl App {
                     ] {
                         ui.add_space(10.);
                         ui.horizontal(|ui| {
-                            ui.add_sized([240., 32.], egui::Label::new(label));
+                            field_label(ui, label, 240.);
                             Frame::new()
                                 .stroke(Stroke::new(1., LINE))
                                 .corner_radius(4)

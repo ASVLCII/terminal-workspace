@@ -1494,10 +1494,10 @@ impl eframe::App for App {
                         DockState::new(Vec::new()),
                     );
                     let mut dock_style = egui_dock::Style::from_egui(ui.style());
-                    dock_style.tab_bar.height = 36.;
+                    dock_style.tab_bar.height = 34.;
                     dock_style.tab_bar.fill_tab_bar = true;
                     dock_style.tab.minimum_width = Some(140.);
-                    dock_style.tab_bar.bg_fill = Color32::from_rgb(32, 32, 34);
+                    dock_style.tab_bar.bg_fill = chrome::CHROME;
                     dock_style.tab.tab_body.inner_margin = egui::Margin::ZERO;
                     dock_style.tab.tab_body.stroke = egui::Stroke::NONE;
                     dock_style.tab.tab_body.bg_fill = Color32::from_rgb(21, 21, 22);
@@ -1508,12 +1508,15 @@ impl eframe::App for App {
                         &mut dock_style.tab.hovered,
                     ] {
                         interaction.corner_radius = egui::CornerRadius::ZERO;
-                        interaction.outline_color = Color32::from_gray(48);
-                        interaction.bg_fill = Color32::from_rgb(35, 35, 37);
+                        interaction.outline_color = chrome::LINE;
+                        interaction.bg_fill = chrome::CHROME;
                     }
+                    dock_style.tab.active.bg_fill = Color32::from_rgb(30, 31, 35);
+                    dock_style.tab.focused.bg_fill = Color32::from_rgb(33, 35, 40);
+                    dock_style.tab.hovered.bg_fill = chrome::HOVER;
                     dock_style.separator.width = 1.;
                     dock_style.separator.extra = 220.;
-                    dock_style.separator.color_idle = Color32::from_gray(56);
+                    dock_style.separator.color_idle = chrome::LINE;
                     let mut horizontal = true;
                     let mut vertical = true;
                     for node in dock.main_surface().iter() {
@@ -1640,19 +1643,19 @@ impl eframe::App for App {
 fn style(ctx: &egui::Context) {
     let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
     style.visuals = egui::Visuals::dark();
-    style.visuals.panel_fill = Color32::from_rgb(29, 29, 31);
-    style.visuals.window_fill = Color32::from_rgb(32, 32, 34);
-    style.visuals.extreme_bg_color = Color32::from_rgb(21, 21, 22);
-    style.visuals.override_text_color = Some(Color32::from_rgb(237, 237, 237));
-    style.visuals.selection.bg_fill = Color32::from_rgb(62, 62, 66);
-    style.visuals.window_stroke = egui::Stroke::new(1., Color32::from_gray(80));
+    style.visuals.panel_fill = chrome::SIDEBAR;
+    style.visuals.window_fill = chrome::CHROME;
+    style.visuals.extreme_bg_color = chrome::CANVAS;
+    style.visuals.override_text_color = Some(chrome::FG);
+    style.visuals.selection.bg_fill = chrome::SELECTED;
+    style.visuals.window_stroke = egui::Stroke::new(1., chrome::LINE);
     style.visuals.window_corner_radius = egui::CornerRadius::same(6);
     style.visuals.window_shadow = Default::default();
-    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(36, 36, 38);
-    style.visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(36, 36, 38);
-    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1., Color32::from_gray(72));
-    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(49, 49, 52);
-    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(49, 49, 52);
+    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(33, 35, 40);
+    style.visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(33, 35, 40);
+    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1., Color32::from_rgb(64, 67, 76));
+    style.visuals.widgets.hovered.bg_fill = chrome::HOVER;
+    style.visuals.widgets.hovered.weak_bg_fill = chrome::HOVER;
     for visual in [
         &mut style.visuals.widgets.inactive,
         &mut style.visuals.widgets.hovered,

@@ -1,6 +1,6 @@
 # Implementation and acceptance record
 
-Date: 2026-11-08. Working title: Terminal Workspace. Windows x64 development build; no publication or signing is claimed.
+Date: 2026-11-08. Working title: Terminal Workspace. Windows x64 development build; public source publication does not imply a signed or fully validated first release.
 
 ## Implemented
 
@@ -39,7 +39,7 @@ Private bytes, release build, this PC (Intel Iris Xe), without trimming:
 
 - Initial default backend: empty window peak 281.78 MiB (fails 200 MiB), four shells + 1920×1080 RGB PNG peak 316.10 MiB (passes 350 MiB).
 - Controlled backend comparison using the same executable: DirectX 12 empty window 117.32 MiB; Vulkan 255.57 MiB. These are diagnostic short samples, not the final workload acceptance numbers.
-- Current release executable SHA-256: `10b19aebab831c343aa95aa698a1befd17aef77aa82f0f1ff10fd57694c4e998`. DirectX 12, CaskaydiaMono NFM 14 pt, 10,000 lines, 12-second warm-up and 12 samples: empty peak **162.30 MiB**, four PowerShell panes plus the 1920×1080 image peak **204.82 MiB**. Both app-only budgets pass.
+- 2026-11-08 release executable SHA-256: `10b19aebab831c343aa95aa698a1befd17aef77aa82f0f1ff10fd57694c4e998`. DirectX 12, CaskaydiaMono NFM 14 pt, 10,000 lines, 12-second warm-up and 12 samples: empty peak **162.30 MiB**, four PowerShell panes plus the 1920×1080 image peak **204.82 MiB**. Both app-only budgets pass.
 - Separate final-sample four-shell figures: hosted processes **242.90 MiB** private bytes, total process tree **447.73 MiB**; GPU **97.86 MiB shared**, **0 dedicated**. Empty GPU allocation: **93.79 MiB shared**. GPU counters are allocation observations, not private-byte budget inputs. No working-set trimming. Retained-growth and representative OpenCode workload gates remain below.
 
 Detailed local test artifacts are under artifacts/ (ignored to avoid committing generated transcripts/media payloads). scripts/benchmark.py creates isolated data and records private-byte workloads; --benchmark-workload is an explicit test mode and never runs on ordinary reopening.
@@ -54,7 +54,7 @@ Detailed local test artifacts are under artifacts/ (ignored to avoid committing 
 
 ## Architecture rulings
 
-- This new standalone repository and implement/native-host branch provide isolation. No existing checkout was changed; no Git remote or publishing is configured.
+- This new standalone repository and implement/native-host branch provide isolation. No existing checkout was changed. GitHub publication was authorized by the user on 2026-11-09.
 - Build caches remain on Z: because C: is full. The approved LocalAppData junction points only this app’s data to Z:.
 - OpenCode’s supported TUI host APIs provide association/status without JSX/Solid dependencies. Staged references appear in native controls; the real CLI retains its prompt.
 - Ctrl+Shift+I pastes a screenshot because egui-winit consumes Ctrl+Shift+V as text paste before application key handlers.
@@ -62,9 +62,19 @@ Detailed local test artifacts are under artifacts/ (ignored to avoid committing 
 - Only visible terminal cells are copied for rendering; complete history grids are never cloned per frame. Repaint wakeups are coalesced by egui rather than queued through the application event channel.
 - DirectX 12 is the Windows default because measured Vulkan fixed overhead misses the agreed idle budget on this PC. WGPU_BACKEND remains a diagnostic override.
 
-## Current local artifacts
+## 2026-11-08 local artifacts
 
 - `dist/app/terminal-workspace.exe`: standalone development application with adjacent bundled plugin.
 - `dist/TerminalWorkspace-0.1.0-dev-x64-setup.exe`: unsigned per-user development installer; SHA-256 `7a078ae837c86aa0c90f30c9a429265eec9b81d04104d93a08e4e3d121e7caee`.
 - Repeatable checks: `scripts/design-verification.py`, `scripts/desktop-font-zoom.py`, `scripts/desktop-quit-startup.py release`, `scripts/benchmark.py`, `scripts/installer-smoke.py`. The desktop checks run sequentially in an interactive Windows session; each uses isolated app-owned data/processes.
 - Clippy completed with advisory style warnings; it is not reported warning-free.
+
+## 2026-11-09 Linear refinement
+
+Scoped visual refinement based on the live public Linear homepage and product illustration; no authenticated Linear application access was used. [Design decisions and tokens](design/2026-11-09-linear-refinement.md).
+
+- Compact toolbar/footer and navigation hierarchy, quieter surface/border palette, distinct active/focused tabs and explicit icon-button keyboard focus. Existing terminal font, pane actions, close policy and integrations are retained.
+- Current Rust workspace verification: 33 tests passed. Real native captures at 960 and 1600 px widths kept Settings pinned; close actions measured exactly centered. Font switching saved and preserved process IDs; wheel zoom changed 18% to 24% in the preview. Main text contrast: 15.04:1, sidebar metadata 6.81:1, metadata on selection 5.18:1. This does not claim a complete accessibility/scaling acceptance pass.
+- Isolated visual-test LOCALAPPDATA was necessary because a user-opened earlier build owns the normal single-instance mutex. That existing application and its processes were left running. The latest payload will be packaged separately under dist/linear/ to avoid replacing its open executable.
+
+- Refined release: app private-byte peaks **159.93 MiB empty** and **202.98 MiB with four PowerShell panes plus the image**, both within budget. Executable SHA-256 `7bb89c50a75d0f5cb463209bdf2f1d4c4baa6bc6fd3ce281942d40c03f1d8b84`. Separate updated payload: `dist/linear/app/terminal-workspace.exe`; unsigned installer: `dist/linear/TerminalWorkspace-0.1.0-dev-x64-setup.exe`. Existing acceptance limits above still apply.

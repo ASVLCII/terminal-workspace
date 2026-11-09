@@ -19,6 +19,8 @@ The written behavior below is authoritative where generated images simplify, omi
 | [03 Settings and closing](03-settings-and-closing-v2.png) | 10 settings, 11 tray, 12 close warning, 13 quit warning |
 | [04 Recovery and status](04-recovery-and-status.png) | 14 errors/recovery, 15 process status |
 
+Current implementation refinement: [Linear-inspired precision pass, 2026-11-09](2026-11-09-linear-refinement.md). This updates the proposed palette and chrome density while preserving the board behavior and user corrections.
+
 ## Shared visual and interaction rules
 
 - Quiet graphite surfaces, low saturation, readable light text; color indicates focus, links, or meaningful state. No ornamental gradients, texture, glow, or card grid.

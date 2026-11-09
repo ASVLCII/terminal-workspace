@@ -128,6 +128,18 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(response.rect, 4., Color32::from_rgb(36, 38, 43));
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            response.rect,
+            4.,
+            Stroke::new(1., Color32::from_rgb(174, 180, 195)),
+            egui::StrokeKind::Inside,
+        );
+    }
     paint(
         ui.painter(),
         response.rect,
@@ -135,7 +147,7 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
         if response.hovered() {
             Color32::WHITE
         } else {
-            Color32::from_gray(195)
+            Color32::from_rgb(158, 161, 171)
         },
     );
     response

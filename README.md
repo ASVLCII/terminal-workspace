@@ -4,6 +4,8 @@ A Windows-first native Rust terminal host: one window, saved projects, independe
 
 **Status: unsigned development build.** Core features are implemented and under acceptance testing. This is not yet a signed or fully validated first release. See [verification status](docs/IMPLEMENTATION.md) and the [master plan](docs/superpowers/plans/2026-11-08-terminal-workspace.md).
 
+![Settings in the native Windows development build](docs/design/implementation-settings.png)
+
 ## Run
 
 Build with Rust 1.95+ and the Windows x64 MSVC tools/SDK:
@@ -53,4 +55,4 @@ Desktop scripts require an interactive Windows desktop, Python, pywinauto and ps
 
 The Windows renderer defaults to wgpu DirectX 12 with memory-oriented allocation. `WGPU_BACKEND=vulkan` is a troubleshooting override and has substantially higher measured fixed RAM on this PC. RAM checks use release private bytes, with hosted processes and GPU allocation reported separately; there is no working-set trimming.
 
-The NSIS installer is per-user, creates a Start-menu shortcut and supplies uninstall support. It adds no startup task, service or updater. Builds are currently unsigned. Locked dependencies and available license/font notices are included in the payload. Microsoft system fonts are loaded from Windows and are not redistributed. Final application licensing and branding remain undecided; publishing is not authorized.
+The NSIS installer is per-user, creates a Start-menu shortcut and supplies uninstall support. It adds no startup task, service or updater. Builds are currently unsigned. Locked dependencies and available license/font notices are included in the payload. Microsoft system fonts are loaded from Windows and are not redistributed. Application licensing and final branding remain undecided. This public source repository is a development project; the release acceptance limits above still apply.
