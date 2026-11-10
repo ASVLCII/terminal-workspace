@@ -1,310 +1,361 @@
 use super::*;
 use crate::icons::{self, Icon};
+use crate::surfaces::{CANVAS, CHROME, FG, HOVER, LINE, MUTED, SELECTED, SIDEBAR};
+use crate::surfaces::{CONTROL_RADIUS, FIELD_RADIUS};
 use egui::{Align, FontId, Frame, Layout, Margin, Sense, Stroke};
-pub(super) const MUTED: Color32 = Color32::from_rgb(158, 161, 171);
-pub(super) const LINE: Color32 = Color32::from_rgb(48, 50, 56);
-pub(super) const CHROME: Color32 = Color32::from_rgb(26, 27, 30);
-pub(super) const SIDEBAR: Color32 = Color32::from_rgb(24, 25, 28);
-pub(super) const CANVAS: Color32 = Color32::from_rgb(21, 21, 22);
-pub(super) const SELECTED: Color32 = Color32::from_rgb(45, 47, 54);
-pub(super) const HOVER: Color32 = Color32::from_rgb(36, 38, 43);
-pub(super) const FG: Color32 = Color32::from_rgb(232, 233, 237);
 fn flat(ui: &mut egui::Ui) {
     ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
     ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
+}
+fn navigation_focus(ui: &egui::Ui, rect: egui::Rect, response: &egui::Response) {
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect,
+            FIELD_RADIUS,
+            Stroke::new(1., Color32::from_gray(180)),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+fn navigation_title(ui: &mut egui::Ui, rect: egui::Rect, text: &str) {
+    let mut job = egui::text::LayoutJob::simple(
+        text.to_owned(),
+        FontId::proportional(13.),
+        FG,
+        (rect.width() - 54.).max(1.),
+    );
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    job.wrap.overflow_character = Some('…');
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    ui.painter().with_clip_rect(rect).galley(
+        egui::pos2(rect.left() + 46., rect.center().y - galley.size().y / 2.),
+        galley,
+        FG,
+    );
 }
 fn primary(label: &str) -> egui::Button<'_> {
     egui::Button::new(RichText::new(label).color(Color32::from_gray(23)))
         .fill(Color32::from_gray(240))
         .stroke(Stroke::new(1., Color32::from_gray(249)))
 }
-fn section(ui: &mut egui::Ui, name: &str) {
-    ui.add_space(24.);
-    ui.label(RichText::new(name).size(14.).strong());
-    ui.add_space(12.);
-}
-fn field_label(ui: &mut egui::Ui, label: &str, width: f32) {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 32.), Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
-    ui.painter().text(
-        rect.left_center(),
-        egui::Align2::LEFT_CENTER,
-        label,
-        FontId::proportional(13.),
-        FG,
-    );
-}
 impl App {
     pub(super) fn history_surface(&mut self, ui: &mut egui::Ui) {
-        Frame::NONE
-            .inner_margin(Margin::symmetric(24, 22))
+        let view_height = ui.available_height();
+        let margin = if ui.available_width() < 640. { 24 } else { 40 };
+        egui::ScrollArea::vertical()
+            .id_salt("history-page")
             .show(ui, |ui| {
-                ui.label(RichText::new("Past chats").size(22.).strong());
-                ui.add_space(18.);
-                if let Some(index) = self.index() {
-                    let current = self.saved.workspaces[index].id.clone();
-                    let title = self.saved.workspaces[index]
-                        .directory
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned();
-                    let projects: Vec<_> = self
-                        .saved
-                        .workspaces
-                        .iter()
-                        .map(|workspace| {
-                            (
-                                workspace.id.clone(),
-                                workspace
-                                    .directory
-                                    .file_name()
-                                    .unwrap_or_default()
-                                    .to_string_lossy()
-                                    .into_owned(),
-                            )
-                        })
-                        .collect();
-                    ui.horizontal(|ui| {
-                        icons::inline(ui, Icon::Folder, FG);
-                        egui::ComboBox::from_id_salt("history-project")
-                            .width(240.)
-                            .selected_text(title)
-                            .show_ui(ui, |ui| {
-                                for (id, name) in projects {
-                                    if ui.selectable_label(current == id, name).clicked() {
-                                        self.saved.selected = Some(id);
-                                        self.history_selected = None;
-                                        self.actions.push(Action::History(None));
+                Frame::NONE
+                    .inner_margin(Margin::symmetric(margin, 32))
+                    .show(ui, |ui| {
+                        ui.set_max_width(ui.available_width().min(920.));
+                        ui.label(RichText::new("Past chats").size(30.).strong());
+                        ui.label(
+                            RichText::new("Find and resume a conversation.")
+                                .size(13.)
+                                .color(MUTED),
+                        );
+                        ui.add_space(24.);
+                        if let Some(index) = self.index() {
+                            let current = self.saved.workspaces[index].id.clone();
+                            let title = self.saved.workspaces[index]
+                                .directory
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned();
+                            let projects: Vec<_> = self
+                                .saved
+                                .workspaces
+                                .iter()
+                                .map(|workspace| {
+                                    (
+                                        workspace.id.clone(),
+                                        workspace
+                                            .directory
+                                            .file_name()
+                                            .unwrap_or_default()
+                                            .to_string_lossy()
+                                            .into_owned(),
+                                    )
+                                })
+                                .collect();
+                            ui.horizontal(|ui| {
+                                icons::inline(ui, Icon::Folder, FG);
+                                let combo_width = (ui.available_width() - 120.).clamp(80., 240.);
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(combo_width, 32.),
+                                    Layout::left_to_right(Align::Center),
+                                    |ui| {
+                                        egui::ComboBox::from_id_salt("history-project")
+                                            .width(combo_width)
+                                            .truncate()
+                                            .selected_text(title)
+                                            .show_ui(ui, |ui| {
+                                                for (id, name) in projects {
+                                                    if ui
+                                                        .selectable_label(current == id, name)
+                                                        .clicked()
+                                                    {
+                                                        self.saved.selected = Some(id);
+                                                        self.history_selected = None;
+                                                        self.actions.push(Action::History(None));
+                                                    }
+                                                }
+                                            });
+                                    },
+                                );
+                                icons::inline(ui, Icon::Terminal, MUTED);
+                                ui.label("OpenCode");
+                            });
+                        }
+                        ui.add_space(12.);
+                        Frame::new()
+                            .fill(crate::surfaces::CONTROL)
+                            .stroke(Stroke::new(1., LINE))
+                            .corner_radius(FIELD_RADIUS)
+                            .inner_margin(Margin::symmetric(12, 6))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    icons::inline(ui, Icon::Search, MUTED);
+                                    if ui
+                                        .add_sized(
+                                            [ui.available_width(), 26.],
+                                            egui::TextEdit::singleline(&mut self.history.search)
+                                                .hint_text("Search chats")
+                                                .frame(Frame::NONE),
+                                        )
+                                        .changed()
+                                    {
+                                        self.history.changed = Some(Instant::now());
+                                    }
+                                });
+                            });
+                        ui.add_space(18.);
+                        let (heading_rect, _) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), 24.),
+                            Sense::hover(),
+                        );
+                        ui.painter().text(
+                            egui::pos2(heading_rect.left() + 36., heading_rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            "Chat",
+                            FontId::proportional(12.),
+                            MUTED,
+                        );
+                        ui.painter().text(
+                            egui::pos2(heading_rect.right() - 16., heading_rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            "Updated",
+                            FontId::proportional(12.),
+                            MUTED,
+                        );
+                        ui.add_space(6.);
+                        if self.history.busy {
+                            ui.spinner();
+                        }
+                        if let Some(error) = &self.history.error {
+                            ui.label(error);
+                            if ui.button("Try again").clicked() {
+                                self.actions.push(Action::History(None));
+                            }
+                        }
+                        if let Some(page) = &self.history.page {
+                            egui::ScrollArea::vertical()
+                                .id_salt("past-chat-rows")
+                                .max_height((view_height * 0.45).max(120.))
+                                .show(ui, |ui| {
+                                    if page.data.is_empty() {
+                                        ui.add_space(18.);
+                                        ui.label(
+                                            RichText::new(
+                                                "No OpenCode chats found for this project.",
+                                            )
+                                            .color(MUTED),
+                                        );
+                                    }
+                                    for chat in &page.data {
+                                        let selected = self
+                                            .history_selected
+                                            .as_ref()
+                                            .is_some_and(|item| item.id == chat.id);
+                                        let (rect, response) = ui.allocate_exact_size(
+                                            egui::vec2(ui.available_width(), 40.),
+                                            Sense::click(),
+                                        );
+                                        if selected || response.hovered() {
+                                            ui.painter().rect_filled(
+                                                rect,
+                                                FIELD_RADIUS,
+                                                if selected { SELECTED } else { HOVER },
+                                            );
+                                        }
+                                        navigation_focus(ui, rect, &response);
+                                        icons::paint(
+                                            ui.painter(),
+                                            egui::Rect::from_center_size(
+                                                egui::pos2(rect.left() + 19., rect.center().y),
+                                                egui::vec2(16., 16.),
+                                            ),
+                                            Icon::Chat,
+                                            FG,
+                                        );
+                                        let mut title = egui::text::LayoutJob::simple(
+                                            chat.title.clone().unwrap_or("Untitled chat".into()),
+                                            FontId::proportional(13.),
+                                            FG,
+                                            (rect.width() - 170.).max(40.),
+                                        );
+                                        title.wrap.max_rows = 1;
+                                        title.wrap.overflow_character = Some('…');
+                                        let galley = ui.fonts_mut(|fonts| fonts.layout_job(title));
+                                        ui.painter().galley(
+                                            egui::pos2(
+                                                rect.left() + 36.,
+                                                rect.center().y - galley.size().y / 2.,
+                                            ),
+                                            galley,
+                                            FG,
+                                        );
+                                        let updated = chat
+                                            .time
+                                            .get("updated")
+                                            .and_then(|value| value.as_u64())
+                                            .map(|millis| {
+                                                let now = std::time::SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .unwrap_or_default()
+                                                    .as_secs();
+                                                let age = now.saturating_sub(millis / 1000);
+                                                if age < 60 {
+                                                    "Just now".into()
+                                                } else if age < 3600 {
+                                                    format!("{} min ago", age / 60)
+                                                } else if age < 86400 {
+                                                    format!("{} h ago", age / 3600)
+                                                } else {
+                                                    format!("{} d ago", age / 86400)
+                                                }
+                                            })
+                                            .unwrap_or_else(|| "—".into());
+                                        ui.painter().text(
+                                            egui::pos2(rect.right() - 16., rect.center().y),
+                                            egui::Align2::RIGHT_CENTER,
+                                            updated,
+                                            FontId::proportional(12.),
+                                            MUTED,
+                                        );
+                                        if response.double_clicked() {
+                                            self.actions.push(Action::Resume(chat.clone()));
+                                        } else if response.clicked() {
+                                            self.history_selected = Some(chat.clone());
+                                        }
+                                    }
+                                });
+                            ui.add_space(10.);
+                            ui.horizontal(|ui| {
+                                if let Some(cursor) = &page.cursor.previous {
+                                    if ui.small_button("Newer").clicked() {
+                                        self.actions.push(Action::History(Some(cursor.clone())));
+                                    }
+                                }
+                                if let Some(cursor) = &page.cursor.next {
+                                    if ui.small_button("Older").clicked() {
+                                        self.actions.push(Action::History(Some(cursor.clone())));
                                     }
                                 }
                             });
-                        icons::inline(ui, Icon::Terminal, MUTED);
-                        ui.label("OpenCode");
-                    });
-                }
-                ui.add_space(12.);
-                Frame::new()
-                    .fill(Color32::from_rgb(28, 28, 30))
-                    .stroke(Stroke::new(1., LINE))
-                    .corner_radius(4)
-                    .inner_margin(Margin::symmetric(10, 5))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            icons::inline(ui, Icon::Search, MUTED);
+                        }
+                        if let Some(chat) = self.history_selected.clone() {
+                            ui.add_space(18.);
+                            ui.separator();
+                            ui.add_space(18.);
+                            ui.label(
+                                RichText::new(chat.title.as_deref().unwrap_or("Untitled chat"))
+                                    .size(18.)
+                                    .strong(),
+                            );
+                            ui.add_space(8.);
+                            ui.label(
+                                RichText::new(format!(
+                                    "OpenCode · {}",
+                                    chat.location.directory.display()
+                                ))
+                                .color(MUTED),
+                            );
+                            ui.add_space(18.);
                             if ui
-                                .add_sized(
-                                    [ui.available_width(), 26.],
-                                    egui::TextEdit::singleline(&mut self.history.search)
-                                        .hint_text("Search chats")
-                                        .frame(Frame::NONE),
-                                )
-                                .changed()
+                                .add_sized([220., 36.], primary("Resume in new terminal"))
+                                .clicked()
                             {
-                                self.history.changed = Some(Instant::now());
+                                self.actions.push(Action::Resume(chat));
                             }
-                        });
-                    });
-                ui.add_space(18.);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Chat").size(12.).color(MUTED));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.add_space(28.);
-                        ui.label(RichText::new("Updated").size(12.).color(MUTED));
-                    });
-                });
-                ui.add_space(6.);
-                if self.history.busy {
-                    ui.spinner();
-                }
-                if let Some(error) = &self.history.error {
-                    ui.label(error);
-                    if ui.button("Try again").clicked() {
-                        self.actions.push(Action::History(None));
-                    }
-                }
-                if let Some(page) = &self.history.page {
-                    egui::ScrollArea::vertical()
-                        .id_salt("past-chat-rows")
-                        .max_height((ui.available_height() * 0.55).max(150.))
-                        .show(ui, |ui| {
-                            if page.data.is_empty() {
-                                ui.add_space(18.);
-                                ui.label(
-                                    RichText::new("No OpenCode chats found for this project.")
-                                        .color(MUTED),
-                                );
-                            }
-                            for chat in &page.data {
-                                let selected = self
-                                    .history_selected
-                                    .as_ref()
-                                    .is_some_and(|item| item.id == chat.id);
-                                let (rect, response) = ui.allocate_exact_size(
-                                    egui::vec2(ui.available_width(), 40.),
-                                    Sense::click(),
-                                );
-                                if selected || response.hovered() {
-                                    ui.painter().rect_filled(
-                                        rect,
-                                        4.,
-                                        Color32::from_gray(if selected { 58 } else { 36 }),
-                                    );
-                                }
-                                icons::paint(
-                                    ui.painter(),
-                                    egui::Rect::from_center_size(
-                                        egui::pos2(rect.left() + 19., rect.center().y),
-                                        egui::vec2(16., 16.),
-                                    ),
-                                    Icon::Chat,
-                                    FG,
-                                );
-                                let mut title = egui::text::LayoutJob::simple(
-                                    chat.title.clone().unwrap_or("Untitled chat".into()),
-                                    FontId::proportional(13.),
-                                    FG,
-                                    (rect.width() - 170.).max(40.),
-                                );
-                                title.wrap.max_rows = 1;
-                                title.wrap.overflow_character = Some('…');
-                                let galley = ui.fonts_mut(|fonts| fonts.layout_job(title));
-                                ui.painter().galley(
-                                    egui::pos2(
-                                        rect.left() + 36.,
-                                        rect.center().y - galley.size().y / 2.,
-                                    ),
-                                    galley,
-                                    FG,
-                                );
-                                let updated = chat
-                                    .time
-                                    .get("updated")
-                                    .and_then(|value| value.as_u64())
-                                    .map(|millis| {
-                                        let now = std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .unwrap_or_default()
-                                            .as_secs();
-                                        let age = now.saturating_sub(millis / 1000);
-                                        if age < 60 {
-                                            "Just now".into()
-                                        } else if age < 3600 {
-                                            format!("{} min ago", age / 60)
-                                        } else if age < 86400 {
-                                            format!("{} h ago", age / 3600)
-                                        } else {
-                                            format!("{} d ago", age / 86400)
-                                        }
-                                    })
-                                    .unwrap_or_else(|| "—".into());
-                                ui.painter().text(
-                                    egui::pos2(rect.right() - 16., rect.center().y),
-                                    egui::Align2::RIGHT_CENTER,
-                                    updated,
-                                    FontId::proportional(12.),
-                                    MUTED,
-                                );
-                                if response.double_clicked() {
-                                    self.actions.push(Action::Resume(chat.clone()));
-                                } else if response.clicked() {
-                                    self.history_selected = Some(chat.clone());
-                                }
-                            }
-                        });
-                    ui.add_space(10.);
-                    ui.horizontal(|ui| {
-                        if let Some(cursor) = &page.cursor.previous {
-                            if ui.small_button("Newer").clicked() {
-                                self.actions.push(Action::History(Some(cursor.clone())));
-                            }
-                        }
-                        if let Some(cursor) = &page.cursor.next {
-                            if ui.small_button("Older").clicked() {
-                                self.actions.push(Action::History(Some(cursor.clone())));
-                            }
+                            ui.add_space(8.);
+                            ui.label(
+                                RichText::new(
+                                    "Opens this conversation without sending a new prompt.",
+                                )
+                                .size(12.)
+                                .color(MUTED),
+                            );
                         }
                     });
-                }
-                if let Some(chat) = self.history_selected.clone() {
-                    ui.add_space(18.);
-                    ui.separator();
-                    ui.add_space(18.);
-                    ui.label(
-                        RichText::new(chat.title.as_deref().unwrap_or("Untitled chat"))
-                            .size(18.)
-                            .strong(),
-                    );
-                    ui.add_space(8.);
-                    ui.label(
-                        RichText::new(format!("OpenCode · {}", chat.location.directory.display()))
-                            .color(MUTED),
-                    );
-                    ui.add_space(18.);
-                    if ui
-                        .add_sized([220., 36.], primary("Resume in new terminal"))
-                        .clicked()
-                    {
-                        self.actions.push(Action::Resume(chat));
-                    }
-                    ui.add_space(8.);
-                    ui.label(
-                        RichText::new("Opens this conversation without sending a new prompt.")
-                            .size(12.)
-                            .color(MUTED),
-                    );
-                }
             });
     }
     pub(super) fn terminal_failure(&mut self, ui: &mut egui::Ui, id: &str, error: &str) {
-        Frame::NONE.inner_margin(24).show(ui, |ui| {
-            ui.add_space(24.);
-            ui.horizontal(|ui| {
-                icons::inline(ui, Icon::Terminal, FG);
-                ui.label(
-                    RichText::new("Could not start this terminal")
-                        .size(19.)
-                        .strong(),
-                );
+        egui::ScrollArea::vertical()
+            .id_salt(("terminal-failure", id))
+            .show(ui, |ui| {
+                Frame::NONE.inner_margin(24).show(ui, |ui| {
+                    ui.add_space(24.);
+                    ui.horizontal_wrapped(|ui| {
+                        icons::inline(ui, Icon::Terminal, FG);
+                        ui.label(
+                            RichText::new("Could not start this terminal")
+                                .size(19.)
+                                .strong(),
+                        );
+                    });
+                    if let Some(definition) = self.definition(id) {
+                        ui.add_space(10.);
+                        ui.label(format!(
+                            "{} · {}",
+                            definition.tool.label(),
+                            definition.directory.display()
+                        ));
+                    }
+                    ui.add_space(16.);
+                    ui.label(error);
+                    ui.add_space(20.);
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.add_sized([130., 34.], primary("Try again")).clicked() {
+                            self.actions.push(Action::Launch(id.into()));
+                        }
+                        if ui
+                            .add_sized([140., 34.], egui::Button::new("Edit command"))
+                            .clicked()
+                        {
+                            self.actions.push(Action::EditCommand(id.into()));
+                        }
+                        if ui
+                            .add_sized([150., 34.], egui::Button::new("Open PowerShell"))
+                            .clicked()
+                        {
+                            self.actions.push(Action::NewTerminal(Tool::PowerShell));
+                        }
+                    });
+                    ui.add_space(16.);
+                    if let Some(workspace) = self.index() {
+                        if ui.button("Locate project folder…").clicked() {
+                            self.actions.push(Action::LocateWorkspace(
+                                self.saved.workspaces[workspace].id.clone(),
+                            ));
+                        }
+                    }
+                });
             });
-            if let Some(definition) = self.definition(id) {
-                ui.add_space(10.);
-                ui.label(format!(
-                    "{} · {}",
-                    definition.tool.label(),
-                    definition.directory.display()
-                ));
-            }
-            ui.add_space(16.);
-            ui.label(error);
-            ui.add_space(20.);
-            ui.horizontal(|ui| {
-                if ui.add_sized([130., 34.], primary("Try again")).clicked() {
-                    self.actions.push(Action::Launch(id.into()));
-                }
-                if ui
-                    .add_sized([140., 34.], egui::Button::new("Edit command"))
-                    .clicked()
-                {
-                    self.actions.push(Action::EditCommand(id.into()));
-                }
-                if ui
-                    .add_sized([150., 34.], egui::Button::new("Open PowerShell"))
-                    .clicked()
-                {
-                    self.actions.push(Action::NewTerminal(Tool::PowerShell));
-                }
-            });
-            ui.add_space(16.);
-            if let Some(workspace) = self.index() {
-                if ui.button("Locate project folder…").clicked() {
-                    self.actions.push(Action::LocateWorkspace(
-                        self.saved.workspaces[workspace].id.clone(),
-                    ));
-                }
-            }
-        });
     }
     pub(super) fn creation_surface(&mut self, ctx: &egui::Context) {
         if self.form.is_none() {
@@ -312,117 +363,135 @@ impl App {
         }
         let (mut browse, mut create, mut cancel) = (false, false, false);
         let form = self.form.as_mut().unwrap();
-        let response = egui::Modal::new(egui::Id::new("workspace-form"))
+        let modal_id = egui::Id::new("workspace-form");
+        let response = egui::Modal::new(modal_id)
+            .area(
+                egui::Modal::default_area(modal_id)
+                    .default_height(ctx.content_rect().height() - 32.),
+            )
             .frame(Frame::window(&ctx.style_of(egui::Theme::Dark)).inner_margin(24))
             .show(ctx, |ui| {
-                ui.set_width(430.);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(if form.custom {
-                            "Custom command"
-                        } else {
-                            "New workspace"
-                        })
-                        .size(19.)
-                        .strong(),
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        cancel = icons::button(ui, Icon::Close, "Cancel").clicked();
-                    });
-                });
-                ui.add_space(20.);
-                if !form.custom {
-                    ui.label("Name");
-                    ui.add_sized(
-                        [ui.available_width(), 32.],
-                        egui::TextEdit::singleline(&mut form.name).hint_text("Daily work"),
-                    );
-                    ui.add_space(16.);
-                } else {
-                    ui.label("Command");
-                    ui.add_sized(
-                        [ui.available_width(), 32.],
-                        egui::TextEdit::singleline(&mut form.command)
-                            .font(egui::TextStyle::Monospace)
-                            .hint_text("npm run dev"),
-                    );
-                    ui.add_space(16.);
-                }
-                ui.label(if form.custom {
-                    "Working folder"
-                } else {
-                    "Project folder"
-                });
-                ui.horizontal(|ui| {
-                    ui.add_sized(
-                        [(ui.available_width() - 104.).max(80.), 32.],
-                        egui::TextEdit::singleline(&mut form.folder),
-                    );
-                    browse = ui
-                        .add_sized([94., 32.], egui::Button::new("Browse…"))
-                        .clicked();
-                });
-                ui.add_space(5.);
-                ui.label(
-                    RichText::new(if form.custom {
-                        "Custom commands run through PowerShell."
-                    } else {
-                        "Choose a folder for this workspace."
-                    })
-                    .size(12.)
-                    .color(MUTED),
-                );
-                if !form.custom {
-                    ui.add_space(18.);
-                    ui.label("Start with");
-                    egui::ComboBox::from_id_salt("first-terminal")
-                        .width(ui.available_width())
-                        .selected_text(form.start.label())
-                        .show_ui(ui, |ui| {
-                            for tool in [
-                                Tool::PowerShell,
-                                Tool::OpenCode,
-                                Tool::ClaudeCode,
-                                Tool::Codex,
-                                Tool::Custom(String::new()),
-                            ] {
-                                let label = tool.label().to_string();
-                                ui.selectable_value(&mut form.start, tool, label);
-                            }
+                ui.set_width(500.);
+                egui::ScrollArea::vertical()
+                    .max_height((ctx.content_rect().height() - 80.).max(100.))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(if form.custom {
+                                    "Custom command"
+                                } else {
+                                    "New workspace"
+                                })
+                                .size(22.)
+                                .strong(),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                cancel = icons::button(ui, Icon::Close, "Cancel").clicked();
+                            });
                         });
-                    if matches!(form.start, Tool::Custom(_)) {
-                        ui.add_space(12.);
-                        ui.label("Command");
-                        ui.add_sized(
-                            [ui.available_width(), 32.],
-                            egui::TextEdit::singleline(&mut form.command),
-                        );
-                    }
-                }
-                if !form.error.is_empty() {
-                    ui.add_space(12.);
-                    ui.colored_label(Color32::from_rgb(234, 137, 144), &form.error);
-                }
-                if form.validating {
-                    ui.spinner();
-                }
-                ui.add_space(24.);
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    create = ui
-                        .add_enabled(
-                            !form.validating,
-                            primary(if form.custom {
-                                "Open terminal"
+                        ui.add_space(20.);
+                        if !form.custom {
+                            ui.label(RichText::new("Name").strong());
+                            ui.add_space(4.);
+                            ui.add_sized(
+                                [ui.available_width(), 36.],
+                                egui::TextEdit::singleline(&mut form.name).hint_text("Daily work"),
+                            );
+                            ui.add_space(16.);
+                        } else {
+                            ui.label(RichText::new("Command").strong());
+                            ui.add_space(4.);
+                            ui.add_sized(
+                                [ui.available_width(), 36.],
+                                egui::TextEdit::singleline(&mut form.command)
+                                    .font(egui::TextStyle::Monospace)
+                                    .hint_text("npm run dev"),
+                            );
+                            ui.add_space(16.);
+                        }
+                        ui.label(
+                            RichText::new(if form.custom {
+                                "Working folder"
                             } else {
-                                "Create workspace"
+                                "Project folder"
                             })
-                            .min_size(egui::vec2(148., 34.)),
-                        )
-                        .clicked();
-                    cancel |= ui
-                        .add_sized([90., 34.], egui::Button::new("Cancel"))
-                        .clicked();
-                });
+                            .strong(),
+                        );
+                        ui.add_space(4.);
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                [(ui.available_width() - 102.).max(80.), 36.],
+                                egui::TextEdit::singleline(&mut form.folder),
+                            );
+                            browse = ui
+                                .add_sized([94., 36.], egui::Button::new("Browse…"))
+                                .clicked();
+                        });
+                        ui.add_space(5.);
+                        ui.label(
+                            RichText::new(if form.custom {
+                                "Custom commands run through PowerShell."
+                            } else {
+                                "Choose a folder for this workspace."
+                            })
+                            .size(12.)
+                            .color(MUTED),
+                        );
+                        if !form.custom {
+                            ui.add_space(18.);
+                            ui.label(RichText::new("Start with").strong());
+                            ui.add_space(4.);
+                            egui::ComboBox::from_id_salt("first-terminal")
+                                .width(ui.available_width())
+                                .selected_text(form.start.label())
+                                .show_ui(ui, |ui| {
+                                    for tool in [
+                                        Tool::PowerShell,
+                                        Tool::OpenCode,
+                                        Tool::ClaudeCode,
+                                        Tool::Codex,
+                                        Tool::Custom(String::new()),
+                                    ] {
+                                        let label = tool.label().to_string();
+                                        ui.selectable_value(&mut form.start, tool, label);
+                                    }
+                                });
+                            if matches!(form.start, Tool::Custom(_)) {
+                                ui.add_space(12.);
+                                ui.label(RichText::new("Command").strong());
+                                ui.add_space(4.);
+                                ui.add_sized(
+                                    [ui.available_width(), 36.],
+                                    egui::TextEdit::singleline(&mut form.command),
+                                );
+                            }
+                        }
+                        if !form.error.is_empty() {
+                            ui.add_space(12.);
+                            ui.colored_label(Color32::from_rgb(234, 137, 144), &form.error);
+                        }
+                        if form.validating {
+                            ui.spinner();
+                        }
+                        ui.add_space(24.);
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            create = ui
+                                .add_enabled(
+                                    !form.validating,
+                                    primary(if form.custom {
+                                        "Open terminal"
+                                    } else {
+                                        "Create workspace"
+                                    })
+                                    .min_size(egui::vec2(148., 34.)),
+                                )
+                                .clicked();
+                            cancel |= ui
+                                .add_sized([90., 34.], egui::Button::new("Cancel"))
+                                .clicked();
+                        });
+                        ui.add_space(8.);
+                    });
             });
         if browse {
             self.picker(None, true, ctx);
@@ -503,7 +572,7 @@ impl App {
                     egui::Align2::LEFT_CENTER,
                     short,
                     FontId::proportional(12.),
-                    FG,
+                    MUTED,
                 );
                 right -= 8.;
             }
@@ -545,6 +614,7 @@ impl App {
                     if response.hovered() {
                         ui.painter().rect_filled(rect, 0., Color32::from_gray(39));
                     }
+                    navigation_focus(ui, rect, &response);
                     icons::paint(
                         ui.painter(),
                         egui::Rect::from_center_size(
@@ -572,7 +642,7 @@ impl App {
                         ui.add_space(18.);
                         let width = (ui.available_width() - 125.).max(20.);
                         let (rect, response) =
-                            ui.allocate_exact_size(egui::vec2(width, 38.), Sense::hover());
+                            ui.allocate_exact_size(egui::vec2(width, 34.), Sense::hover());
                         ui.painter().with_clip_rect(rect).text(
                             rect.left_center(),
                             egui::Align2::LEFT_CENTER,
@@ -602,8 +672,8 @@ impl App {
                         Frame::new()
                             .fill(CHROME)
                             .stroke(Stroke::new(1., LINE))
-                            .corner_radius(4)
-                            .inner_margin(Margin::symmetric(10, 4))
+                            .corner_radius(FIELD_RADIUS)
+                            .inner_margin(Margin::symmetric(12, 4))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     icons::inline(ui, Icon::Search, MUTED);
@@ -680,8 +750,9 @@ impl App {
                                         Sense::click(),
                                     );
                                     if response.hovered() {
-                                        ui.painter().rect_filled(rect, 4., Color32::from_gray(37));
+                                        ui.painter().rect_filled(rect, FIELD_RADIUS, HOVER);
                                     }
+                                    navigation_focus(ui, rect, &response);
                                     icons::paint(
                                         ui.painter(),
                                         egui::Rect::from_center_size(
@@ -704,13 +775,7 @@ impl App {
                                         .file_name()
                                         .unwrap_or(directory.as_os_str())
                                         .to_string_lossy();
-                                    ui.painter().text(
-                                        egui::pos2(rect.left() + 46., rect.center().y),
-                                        egui::Align2::LEFT_CENTER,
-                                        &name,
-                                        FontId::proportional(13.),
-                                        FG,
-                                    );
+                                    navigation_title(ui, rect, &name);
                                     if response
                                         .on_hover_text(directory.to_string_lossy())
                                         .clicked()
@@ -733,10 +798,11 @@ impl App {
                                                 if active || response.hovered() {
                                                     ui.painter().rect_filled(
                                                         rect,
-                                                        4.,
+                                                        FIELD_RADIUS,
                                                         if active { SELECTED } else { HOVER },
                                                     );
                                                 }
+                                                navigation_focus(ui, rect, &response);
                                                 icons::paint(
                                                     ui.painter(),
                                                     egui::Rect::from_center_size(
@@ -761,14 +827,9 @@ impl App {
                                                     Icon::Folder,
                                                     FG,
                                                 );
-                                                ui.painter().text(
-                                                    egui::pos2(rect.left() + 46., rect.center().y),
-                                                    egui::Align2::LEFT_CENTER,
-                                                    &workspace.name,
-                                                    FontId::proportional(13.),
-                                                    FG,
-                                                );
-                                                if response.clicked() {
+                                                navigation_title(ui, rect, &workspace.name);
+                                                if response.on_hover_text(&workspace.name).clicked()
+                                                {
                                                     self.saved.selected =
                                                         Some(workspace.id.clone());
                                                     self.workspace_expansion.insert(
@@ -795,7 +856,7 @@ impl App {
                                                             if chosen || response.hovered() {
                                                                 ui.painter().rect_filled(
                                                                     rect,
-                                                                    4.,
+                                                                    FIELD_RADIUS,
                                                                     if chosen {
                                                                         SELECTED
                                                                     } else {
@@ -803,6 +864,7 @@ impl App {
                                                                     },
                                                                 );
                                                             }
+                                                            navigation_focus(ui, rect, &response);
                                                             icons::paint(
                                                                 ui.painter(),
                                                                 egui::Rect::from_center_size(
@@ -920,19 +982,24 @@ impl App {
                             {
                                 ui.horizontal(|ui| {
                                     icons::inline(ui, Icon::Chat, FG);
+                                    let title = chat.title.as_deref().unwrap_or("Untitled chat");
+                                    let width = ui.available_width();
                                     if ui
-                                        .add(
-                                            egui::Button::new(
-                                                chat.title.as_deref().unwrap_or("Untitled chat"),
-                                            )
-                                            .frame(false),
+                                        .add_sized(
+                                            [width, 28.],
+                                            egui::Button::new("")
+                                                .left_text(title)
+                                                .frame(false)
+                                                .truncate(),
                                         )
+                                        .on_hover_text(title)
                                         .clicked()
                                     {
                                         self.actions.push(Action::Resume(chat.clone()));
                                     }
                                 });
-                                ui.indent(&chat.id, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(26.);
                                     ui.label(RichText::new("OpenCode").size(12.).color(MUTED));
                                 });
                                 ui.add_space(7.);
@@ -964,9 +1031,28 @@ impl App {
                             .file_name()
                             .unwrap_or_default()
                             .to_string_lossy();
-                        ui.label(RichText::new(project).size(13.).color(MUTED));
-                        ui.label(RichText::new("/").size(13.).color(MUTED));
-                        ui.label(RichText::new(&workspace.name).size(13.).strong());
+                        let breadcrumb = format!("{} / {}", project, workspace.name);
+                        let mut job = egui::text::LayoutJob::default();
+                        let muted = egui::TextFormat {
+                            font_id: FontId::proportional(13.),
+                            color: MUTED,
+                            ..Default::default()
+                        };
+                        let primary = egui::TextFormat {
+                            font_id: FontId::proportional(13.),
+                            color: FG,
+                            ..Default::default()
+                        };
+                        job.append(&format!("{} / ", project), 0., muted);
+                        job.append(&workspace.name, 0., primary);
+                        let width = (ui.available_width() - 220.).max(0.);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(width, 30.),
+                            Layout::left_to_right(Align::Center),
+                            |ui| ui.add(egui::Label::new(job).truncate()),
+                        )
+                        .inner
+                        .on_hover_text(breadcrumb);
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if icons::button(ui, Icon::Image, "Open image preview").clicked() {
                                 self.pick_preview(ui.ctx());
@@ -1074,55 +1160,90 @@ impl App {
             .show(ui, |ui| {
                 if !files.is_empty() {
                     Frame::new()
-                        .fill(Color32::from_rgb(31, 31, 33))
+                        .fill(crate::surfaces::CONTROL)
                         .stroke(Stroke::new(1., Color32::from_gray(64)))
-                        .corner_radius(4)
-                        .inner_margin(10)
+                        .corner_radius(CONTROL_RADIUS)
+                        .inner_margin(12)
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(format!("To {}", def.name))
-                                        .size(13.)
-                                        .color(MUTED),
-                                );
+                                let target = format!("To {}", def.name);
+                                let title_width = (ui.available_width() - 40.).max(0.);
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(title_width, 30.),
+                                    Layout::left_to_right(Align::Center),
+                                    |ui| {
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(&target).size(13.).color(MUTED),
+                                            )
+                                            .truncate(),
+                                        )
+                                    },
+                                )
+                                .inner
+                                .on_hover_text(target);
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     self.attach_menu(ui, id);
                                 });
                             });
-                            ui.horizontal_wrapped(|ui| {
-                                for file in &files {
-                                    if ui
-                                        .small_button(format!("{}   ×", file.name))
-                                        .on_hover_text("Remove staged reference")
-                                        .clicked()
-                                    {
-                                        if let Some(chat) = &def.chat {
-                                            self.runtime.bridge.remove(chat, &file.uri);
-                                        }
-                                    }
-                                    if let Ok(url) = url::Url::parse(&file.uri) {
-                                        if let Ok(path) = url.to_file_path() {
-                                            if path.extension().is_some_and(|ext| {
-                                                ["png", "jpg", "jpeg", "webp", "gif", "bmp"]
-                                                    .contains(
-                                                        &ext.to_string_lossy()
-                                                            .to_ascii_lowercase()
-                                                            .as_str(),
-                                                    )
-                                            }) {
-                                                if icons::button(ui, Icon::Image, "Preview image")
-                                                    .clicked()
-                                                {
-                                                    self.actions.push(Action::Preview(path));
+                            egui::ScrollArea::vertical()
+                                .id_salt(("staged-attachments", id))
+                                .min_scrolled_height(0.)
+                                .max_height(34.)
+                                .show(ui, |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        for file in &files {
+                                            let remove_label =
+                                                format!("Remove staged reference: {}", file.name);
+                                            let remove = ui
+                                                .add_sized(
+                                                    [ui.available_width().clamp(60., 200.), 24.],
+                                                    egui::Button::new(format!("×  {}", file.name))
+                                                        .truncate(),
+                                                )
+                                                .on_hover_text(&remove_label);
+                                            remove.widget_info(|| {
+                                                egui::WidgetInfo::labeled(
+                                                    egui::WidgetType::Button,
+                                                    ui.is_enabled(),
+                                                    &remove_label,
+                                                )
+                                            });
+                                            if remove.clicked() {
+                                                if let Some(chat) = &def.chat {
+                                                    self.runtime.bridge.remove(chat, &file.uri);
+                                                }
+                                            }
+                                            if let Ok(url) = url::Url::parse(&file.uri) {
+                                                if let Ok(path) = url.to_file_path() {
+                                                    if path.extension().is_some_and(|ext| {
+                                                        ["png", "jpg", "jpeg", "webp", "gif", "bmp"]
+                                                            .contains(
+                                                                &ext.to_string_lossy()
+                                                                    .to_ascii_lowercase()
+                                                                    .as_str(),
+                                                            )
+                                                    }) {
+                                                        if icons::button(
+                                                            ui,
+                                                            Icon::Image,
+                                                            "Preview image",
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            self.actions
+                                                                .push(Action::Preview(path));
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
-                                }
-                            });
+                                    });
+                                });
                         });
                 }
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 7.;
                     flat(ui);
                     if ui.small_button("Add files").clicked() {
                         self.picker(Some(id.into()), false, ui.ctx());
@@ -1194,7 +1315,20 @@ impl App {
                         },
                         FG,
                     );
-                    ui.label(self.pane_name(pane));
+                    let title = self.pane_name(pane);
+                    let actions_width = if matches!(pane, Pane::Terminal(_) | Pane::Image(_)) {
+                        80.
+                    } else {
+                        40.
+                    };
+                    let title_width = (ui.available_width() - actions_width).max(20.);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(title_width, 30.),
+                        Layout::left_to_right(Align::Center),
+                        |ui| ui.add(egui::Label::new(RichText::new(&title).size(13.)).truncate()),
+                    )
+                    .inner
+                    .on_hover_text(title);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if icons::button(ui, Icon::Close, "Close pane").clicked() {
                             self.actions.push(Action::Close(pane.clone()));
@@ -1208,178 +1342,6 @@ impl App {
                 });
             });
     }
-    pub(super) fn settings_surface(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            Frame::NONE
-                .inner_margin(Margin::symmetric(32, 28))
-                .show(ui, |ui| {
-                    ui.set_max_width(720.);
-                    ui.label(RichText::new("Settings").size(22.).strong());
-                    ui.add_space(14.);
-                    ui.separator();
-                    section(ui, "Terminal");
-                    ui.horizontal(|ui| {
-                        field_label(ui, "Font", 170.);
-                        let previous = self.saved.settings.font_family.clone();
-                        egui::ComboBox::from_id_salt("terminal-font-family")
-                            .width(270.)
-                            .selected_text(&self.saved.settings.font_family)
-                            .show_ui(ui, |ui| {
-                                for choice in &self.font_choices {
-                                    ui.selectable_value(
-                                        &mut self.saved.settings.font_family,
-                                        choice.family.clone(),
-                                        &choice.family,
-                                    );
-                                }
-                            });
-                        if self.saved.settings.font_family != previous {
-                            self.font_loader
-                                .apply(self.saved.settings.font_family.clone());
-                            self.changed();
-                        }
-                    });
-                    if let Some(error) = &self.font_error {
-                        ui.label(
-                            RichText::new(error)
-                                .size(12.)
-                                .color(Color32::from_rgb(234, 137, 144)),
-                        );
-                    }
-                    ui.add_space(12.);
-                    ui.horizontal(|ui| {
-                        field_label(ui, "Font size", 170.);
-                        if ui.add_sized([32., 32.], egui::Button::new("−")).clicked() {
-                            self.saved.settings.font_size =
-                                (self.saved.settings.font_size - 1.).max(10.);
-                            self.changed();
-                        }
-                        ui.add_sized(
-                            [42., 32.],
-                            egui::Label::new(format!("{:.0}", self.saved.settings.font_size)),
-                        );
-                        if ui.add_sized([32., 32.], egui::Button::new("+")).clicked() {
-                            self.saved.settings.font_size =
-                                (self.saved.settings.font_size + 1.).min(28.);
-                            self.changed();
-                        }
-                        ui.label(RichText::new("pt").color(MUTED));
-                    });
-                    ui.add_space(12.);
-                    Frame::new()
-                        .fill(Color32::from_rgb(21, 21, 22))
-                        .stroke(Stroke::new(1., LINE))
-                        .corner_radius(4)
-                        .inner_margin(Margin::symmetric(16, 12))
-                        .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.label(
-                                RichText::new("PS X:\\project> echo Hello")
-                                    .font(FontId::monospace(self.saved.settings.font_size)),
-                            );
-                        });
-                    ui.add_space(16.);
-                    ui.horizontal(|ui| {
-                        field_label(ui, "Scrollback", 170.);
-                        let before = self.saved.settings.scrollback;
-                        egui::ComboBox::from_id_salt("scrollback")
-                            .width(200.)
-                            .selected_text(format!("{} lines", self.saved.settings.scrollback))
-                            .show_ui(ui, |ui| {
-                                for count in [1000, 5000, 10000, 20000, 50000] {
-                                    ui.selectable_value(
-                                        &mut self.saved.settings.scrollback,
-                                        count,
-                                        format!("{} lines", count),
-                                    );
-                                }
-                            });
-                        if before != self.saved.settings.scrollback {
-                            for terminal in self.runtime.terminals.values_mut() {
-                                terminal
-                                    .backend
-                                    .set_scrollback(self.saved.settings.scrollback);
-                            }
-                            self.changed();
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.add_space(178.);
-                        ui.label(
-                            RichText::new("Older lines are discarded.")
-                                .size(12.)
-                                .color(MUTED),
-                        );
-                    });
-                    ui.add_space(24.);
-                    ui.separator();
-                    section(ui, "Closing behavior");
-                    ui.horizontal(|ui| {
-                        field_label(ui, "When I close the window", 170.);
-                        let before = self.saved.settings.closing;
-                        egui::ComboBox::from_id_salt("closing-policy")
-                            .width(250.)
-                            .selected_text(match self.saved.settings.closing {
-                                Closing::Ask => "Ask every time",
-                                Closing::Stop => "Stop terminals and quit",
-                                Closing::Background => "Run in background",
-                            })
-                            .show_ui(ui, |ui| {
-                                for (value, label) in [
-                                    (Closing::Ask, "Ask every time"),
-                                    (Closing::Stop, "Stop terminals and quit"),
-                                    (Closing::Background, "Run in background"),
-                                ] {
-                                    ui.selectable_value(
-                                        &mut self.saved.settings.closing,
-                                        value,
-                                        label,
-                                    );
-                                }
-                            });
-                        if before != self.saved.settings.closing {
-                            self.changed();
-                        }
-                    });
-                    ui.add_space(8.);
-                    ui.label(
-                        RichText::new("Background terminals keep running and using memory.")
-                            .size(12.)
-                            .color(MUTED),
-                    );
-                    ui.add_space(24.);
-                    ui.separator();
-                    section(ui, "Keyboard shortcuts");
-                    for (label, key) in [
-                        ("New workspace", "Ctrl+Shift+N"),
-                        ("New terminal", "Ctrl+Shift+T"),
-                        ("Settings", "Ctrl+,"),
-                        ("Paste screenshot", "Ctrl+Shift+I"),
-                        ("Restore pane", "Escape"),
-                    ] {
-                        ui.add_space(10.);
-                        ui.horizontal(|ui| {
-                            field_label(ui, label, 240.);
-                            Frame::new()
-                                .stroke(Stroke::new(1., LINE))
-                                .corner_radius(4)
-                                .inner_margin(Margin::symmetric(8, 5))
-                                .show(ui, |ui| {
-                                    ui.monospace(key);
-                                });
-                        });
-                        ui.add_space(10.);
-                        ui.separator();
-                    }
-                    ui.add_space(10.);
-                    ui.label(
-                        RichText::new("Terminal shortcuts stay with the running program.")
-                            .size(12.)
-                            .color(MUTED),
-                    );
-                });
-        });
-    }
     pub(super) fn image_surface(&mut self, ui: &mut egui::Ui, path: &PathBuf) {
         if !self.images.contains_key(path)
             && !self.image_errors.contains_key(path)
@@ -1388,7 +1350,12 @@ impl App {
             self.media.request(path, ui.ctx());
         }
         if let Some(image) = self.images.get_mut(path) {
-            let size = egui::vec2(ui.available_width(), (ui.available_height() - 46.).max(40.));
+            let narrow_footer = ui.available_width() < 260.;
+            let footer_height = if narrow_footer { 114. } else { 52. };
+            let size = egui::vec2(
+                ui.available_width(),
+                (ui.available_height() - footer_height).max(40.),
+            );
             let (rect, response) = ui.allocate_exact_size(size, Sense::drag());
             let bounds = rect.shrink(18.);
             let native = image.texture.size_vec2();
@@ -1430,62 +1397,89 @@ impl App {
             Frame::NONE
                 .inner_margin(Margin::symmetric(14, 6))
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(format!(
-                                    "{} · {} × {}",
-                                    path.file_name().unwrap_or_default().to_string_lossy(),
-                                    native.x as u32,
-                                    native.y as u32
-                                ))
+                    let caption = format!(
+                        "{} · {} × {}",
+                        path.file_name().unwrap_or_default().to_string_lossy(),
+                        native.x as u32,
+                        native.y as u32
+                    );
+                    let mut controls = |ui: &mut egui::Ui| {
+                        ui.label(
+                            RichText::new(format!("{:.0}%", image.zoom * 100.))
                                 .size(12.)
                                 .color(MUTED),
-                            )
-                            .truncate(),
                         );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.small_button("+").clicked() {
-                                image.fit = false;
-                                image.zoom = (image.zoom * 1.25).min(16.);
-                            }
-                            if ui.small_button("−").clicked() {
-                                image.fit = false;
-                                image.zoom = (image.zoom / 1.25).max(0.02);
-                            }
-                            if ui.small_button("Fit").clicked() {
-                                image.fit = true;
-                                image.pan = egui::Vec2::ZERO;
-                            }
-                            ui.label(
-                                RichText::new(format!("{:.0}%", image.zoom * 100.))
-                                    .size(12.)
-                                    .color(MUTED),
+                        if ui.small_button("Fit").clicked() {
+                            image.fit = true;
+                            image.pan = egui::Vec2::ZERO;
+                        }
+                        if ui.small_button("−").clicked() {
+                            image.fit = false;
+                            image.zoom = (image.zoom / 1.25).max(0.02);
+                        }
+                        if ui.small_button("+").clicked() {
+                            image.fit = false;
+                            image.zoom = (image.zoom * 1.25).min(16.);
+                        }
+                    };
+                    if narrow_footer {
+                        ui.add(
+                            egui::Label::new(RichText::new(&caption).size(12.).color(MUTED))
+                                .truncate(),
+                        )
+                        .on_hover_text(&caption);
+                        ui.horizontal_wrapped(|ui| controls(ui));
+                    } else {
+                        ui.horizontal(|ui| {
+                            let label_width = (ui.available_width() - 190.).max(0.);
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(label_width, 32.),
+                                Layout::left_to_right(Align::Center),
+                                |ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&caption).size(12.).color(MUTED),
+                                        )
+                                        .truncate(),
+                                    )
+                                },
+                            )
+                            .inner
+                            .on_hover_text(&caption);
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(182., 32.),
+                                Layout::left_to_right(Align::Center),
+                                |ui| controls(ui),
                             );
+                        });
+                    }
+                });
+        } else if let Some(error) = self.image_errors.get(path).cloned() {
+            let top_space = ui.available_height() * 0.18;
+            egui::ScrollArea::vertical()
+                .id_salt(("image-error", path))
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(top_space);
+                        icons::inline(ui, Icon::Image, FG);
+                        ui.heading("Image unavailable");
+                        ui.label("The file may have moved or cannot be read.");
+                        ui.add_space(16.);
+                        if ui.add(primary("Locate image…")).clicked() {
+                            self.actions.push(Action::LocateImage(path.clone()));
+                        }
+                        if ui.button("Try again").clicked() {
+                            self.image_errors.remove(path);
+                            self.loading.insert(path.clone());
+                            self.media.request(path, ui.ctx());
+                        }
+                        ui.add_space(12.);
+                        ui.collapsing("Details", |ui| {
+                            ui.label(error);
+                            ui.label(path.to_string_lossy());
                         });
                     });
                 });
-        } else if let Some(error) = self.image_errors.get(path).cloned() {
-            ui.vertical_centered(|ui| {
-                ui.add_space(ui.available_height() * 0.28);
-                icons::inline(ui, Icon::Image, FG);
-                ui.heading("Image unavailable");
-                ui.label("The file may have moved or cannot be read.");
-                ui.add_space(16.);
-                if ui.add(primary("Locate image…")).clicked() {
-                    self.actions.push(Action::LocateImage(path.clone()));
-                }
-                if ui.button("Try again").clicked() {
-                    self.image_errors.remove(path);
-                    self.loading.insert(path.clone());
-                    self.media.request(path, ui.ctx());
-                }
-                ui.add_space(12.);
-                ui.collapsing("Details", |ui| {
-                    ui.label(error);
-                    ui.label(path.to_string_lossy());
-                });
-            });
         } else {
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() * 0.4);

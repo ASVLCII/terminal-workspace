@@ -1,3 +1,4 @@
+use crate::surfaces::{CONTROL_RADIUS, HOVER};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke};
 #[derive(Clone, Copy)]
 pub enum Icon {
@@ -130,13 +131,13 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     });
     if response.hovered() {
         ui.painter()
-            .rect_filled(response.rect, 4., Color32::from_rgb(36, 38, 43));
+            .rect_filled(response.rect, CONTROL_RADIUS, HOVER);
     }
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,
-            4.,
-            Stroke::new(1., Color32::from_rgb(174, 180, 195)),
+            CONTROL_RADIUS,
+            Stroke::new(1., Color32::from_gray(180)),
             egui::StrokeKind::Inside,
         );
     }
@@ -147,7 +148,7 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
         if response.hovered() {
             Color32::WHITE
         } else {
-            Color32::from_rgb(158, 161, 171)
+            crate::surfaces::MUTED
         },
     );
     response

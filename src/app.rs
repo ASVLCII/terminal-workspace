@@ -1,4 +1,5 @@
 mod chrome;
+mod settings;
 use eframe::egui::{self, Color32, RichText};
 use egui_dock::{DockArea, DockState, TabViewer};
 use std::{
@@ -304,7 +305,19 @@ impl App {
                 .map(|d| d.name.clone())
                 .unwrap_or("terminal".into());
             let (mut cancel, mut stop) = (false, false);
-            let response=egui::Modal::new(egui::Id::new("stop-terminal")).show(ctx,|ui|{ui.set_width(420.);ui.heading(format!("Stop {name}?"));ui.label("This ends this terminal and its owned processes. Other terminals keep running.");ui.add_space(20.);ui.horizontal(|ui|{cancel=ui.button("Cancel").clicked();stop=ui.button("Stop terminal").clicked();});});
+            let response = egui::Modal::new(egui::Id::new("stop-terminal"))
+                .frame(egui::Frame::window(&ctx.style_of(egui::Theme::Dark)).inner_margin(24))
+                .show(ctx, |ui| {
+                    ui.set_width(420.);
+                    ui.add(egui::Label::new(RichText::new(format!("Stop {name}?")).size(20.).strong()).wrap());
+                    ui.add_space(8.);
+                    ui.label("This ends this terminal and its owned processes. Other terminals keep running.");
+                    ui.add_space(20.);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        stop = ui.add_sized([120., 34.], egui::Button::new("Stop terminal")).clicked();
+                        cancel = ui.add_sized([90., 34.], egui::Button::new("Cancel")).clicked();
+                    });
+                });
             if cancel || response.should_close() {
                 self.terminal_question = None;
             }
@@ -317,15 +330,23 @@ impl App {
         if let Some((id, since)) = self.terminal_stopping.clone() {
             if since.elapsed() > Duration::from_secs(5) {
                 let (mut force, mut cancel) = (false, false);
-                egui::Modal::new(egui::Id::new("force-terminal")).show(ctx, |ui| {
-                    ui.set_width(420.);
-                    ui.heading("This terminal is still running");
-                    ui.label("Normal shutdown has not finished.");
-                    ui.horizontal(|ui| {
-                        cancel = ui.button("Keep terminal").clicked();
-                        force = ui.button("Force stop terminal").clicked();
+                egui::Modal::new(egui::Id::new("force-terminal"))
+                    .frame(egui::Frame::window(&ctx.style_of(egui::Theme::Dark)).inner_margin(24))
+                    .show(ctx, |ui| {
+                        ui.set_width(420.);
+                        ui.heading("This terminal is still running");
+                        ui.add_space(8.);
+                        ui.label("Normal shutdown has not finished.");
+                        ui.add_space(20.);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            force = ui
+                                .add_sized([150., 34.], egui::Button::new("Force stop terminal"))
+                                .clicked();
+                            cancel = ui
+                                .add_sized([120., 34.], egui::Button::new("Keep terminal"))
+                                .clicked();
+                        });
                     });
-                });
                 if cancel {
                     self.terminal_stopping = None;
                 }
@@ -363,17 +384,20 @@ impl App {
                     if !self.explicit_quit {
                         ui.add_space(8.);
                         ui.checkbox(&mut self.remember, "Don’t show this again");
-                        ui.label(
-                            RichText::new("Remember the action you choose below.")
-                                .size(12.)
-                                .color(Color32::from_gray(170)),
-                        );
+                        ui.horizontal(|ui| {
+                            ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
+                            ui.label(
+                                RichText::new("Remember the action you choose below.")
+                                    .size(12.)
+                                    .color(crate::surfaces::MUTED),
+                            );
+                        });
                     }
                     ui.add_space(24.);
                     ui.horizontal(|ui| {
                         let total = if self.explicit_quit { 310. } else { 372. };
                         ui.add_space(((ui.available_width() - total) / 2.).max(0.));
-                        let cancel = ui.add_sized([76., 32.], egui::Button::new("Cancel"));
+                        let cancel = ui.add_sized([76., 34.], egui::Button::new("Cancel"));
                         if first {
                             cancel.request_focus();
                         }
@@ -382,7 +406,7 @@ impl App {
                         }
                         if !self.explicit_quit
                             && ui
-                                .add_sized([148., 32.], egui::Button::new("Run in background"))
+                                .add_sized([148., 34.], egui::Button::new("Run in background"))
                                 .clicked()
                         {
                             action = Some(Choice::Background);
@@ -429,7 +453,24 @@ impl App {
                 .is_some_and(|t| t.elapsed() > Duration::from_secs(5));
             let mut force_stop = false;
             let mut cancel = false;
-            egui::Modal::new(egui::Id::new("shutdown")).show(ctx,|ui|{ui.set_width(440.);ui.heading(if force{"Some processes are still running"}else{"Stopping terminals…"});ui.add_space(12.);if force{ui.label("Normal shutdown has not finished. Force stop affects only processes owned by this app.");ui.horizontal(|ui|{cancel=ui.button("Return to app").clicked();force_stop=ui.button("Force stop and quit").clicked();});}else{ui.spinner();ui.label("Waiting for owned terminals and the OpenCode backend.");}});
+            egui::Modal::new(egui::Id::new("shutdown"))
+                .frame(egui::Frame::window(&ctx.style_of(egui::Theme::Dark)).inner_margin(24))
+                .show(ctx, |ui| {
+                    ui.set_width(440.);
+                    ui.heading(if force { "Some processes are still running" } else { "Stopping terminals…" });
+                    ui.add_space(12.);
+                    if force {
+                        ui.label("Normal shutdown has not finished. Force stop affects only processes owned by this app.");
+                        ui.add_space(20.);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            force_stop = ui.add_sized([160., 34.], egui::Button::new("Force stop and quit")).clicked();
+                            cancel = ui.add_sized([120., 34.], egui::Button::new("Return to app")).clicked();
+                        });
+                    } else {
+                        ui.spinner();
+                        ui.label("Waiting for owned terminals and the OpenCode backend.");
+                    }
+                });
             if cancel {
                 self.shutdown_waiting = false;
                 self.shutdown_started = None;
@@ -1003,7 +1044,13 @@ impl App {
             .map(|chat| !self.runtime.bridge.files(chat).is_empty())
             .unwrap_or(false);
         let footer = if opencode {
-            if staged { 112. } else { 48. }
+            let narrow = ui.available_width() < 244.;
+            match (staged, narrow) {
+                (true, true) => 204.,
+                (true, false) => 164.,
+                (false, true) => 96.,
+                (false, false) => 56.,
+            }
         } else {
             0.
         };
@@ -1063,7 +1110,7 @@ impl App {
                             ui.painter().rect_stroke(
                                 response.rect,
                                 4.,
-                                egui::Stroke::new(2., Color32::from_rgb(72, 171, 223)),
+                                egui::Stroke::new(2., Color32::from_gray(200)),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -1098,7 +1145,12 @@ impl App {
                 }
             });
         if opencode {
-            self.attachment_footer(ui, id);
+            let available = ui.available_height().max(0.);
+            egui::ScrollArea::vertical()
+                .id_salt(("attachment-footer-container", id))
+                .min_scrolled_height(0.)
+                .max_height(available)
+                .show(ui, |ui| self.attachment_footer(ui, id));
         }
     }
     fn settings(&mut self, ui: &mut egui::Ui) {
@@ -1466,7 +1518,7 @@ impl eframe::App for App {
         }
         self.workspace_chrome(ui);
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(Color32::from_rgb(21, 21, 22)))
+            .frame(egui::Frame::NONE.fill(crate::surfaces::CANVAS))
             .show(ui, |ui| {
                 if let Some(pane) = self.global_pane.clone() {
                     self.maximized_header(ui, &pane);
@@ -1497,10 +1549,10 @@ impl eframe::App for App {
                     dock_style.tab_bar.height = 34.;
                     dock_style.tab_bar.fill_tab_bar = true;
                     dock_style.tab.minimum_width = Some(140.);
-                    dock_style.tab_bar.bg_fill = chrome::CHROME;
+                    dock_style.tab_bar.bg_fill = crate::surfaces::CHROME;
                     dock_style.tab.tab_body.inner_margin = egui::Margin::ZERO;
                     dock_style.tab.tab_body.stroke = egui::Stroke::NONE;
-                    dock_style.tab.tab_body.bg_fill = Color32::from_rgb(21, 21, 22);
+                    dock_style.tab.tab_body.bg_fill = crate::surfaces::CANVAS;
                     for interaction in [
                         &mut dock_style.tab.active,
                         &mut dock_style.tab.inactive,
@@ -1508,15 +1560,15 @@ impl eframe::App for App {
                         &mut dock_style.tab.hovered,
                     ] {
                         interaction.corner_radius = egui::CornerRadius::ZERO;
-                        interaction.outline_color = chrome::LINE;
-                        interaction.bg_fill = chrome::CHROME;
+                        interaction.outline_color = crate::surfaces::LINE;
+                        interaction.bg_fill = crate::surfaces::CHROME;
                     }
-                    dock_style.tab.active.bg_fill = Color32::from_rgb(30, 31, 35);
-                    dock_style.tab.focused.bg_fill = Color32::from_rgb(33, 35, 40);
-                    dock_style.tab.hovered.bg_fill = chrome::HOVER;
+                    dock_style.tab.active.bg_fill = crate::surfaces::CHROME;
+                    dock_style.tab.focused.bg_fill = crate::surfaces::CONTROL;
+                    dock_style.tab.hovered.bg_fill = crate::surfaces::HOVER;
                     dock_style.separator.width = 1.;
                     dock_style.separator.extra = 220.;
-                    dock_style.separator.color_idle = chrome::LINE;
+                    dock_style.separator.color_idle = crate::surfaces::LINE;
                     let mut horizontal = true;
                     let mut vertical = true;
                     for node in dock.main_surface().iter() {
@@ -1591,13 +1643,24 @@ impl eframe::App for App {
         self.close_ui(&ctx);
         if self.error.is_some() {
             let (mut dismiss, mut discard) = (false, false);
-            let response = egui::Modal::new(egui::Id::new("error"))
+            let error_id = egui::Id::new("error");
+            let response = egui::Modal::new(error_id)
+                .area(
+                    egui::Modal::default_area(error_id)
+                        .default_height(ctx.content_rect().height() - 32.),
+                )
                 .frame(egui::Frame::window(&ctx.style_of(egui::Theme::Dark)).inner_margin(24))
                 .show(&ctx, |ui| {
                     ui.set_width(480.);
                     ui.heading("Something needs attention");
                     ui.add_space(16.);
-                    ui.label(self.error.as_deref().unwrap_or_default());
+                    egui::ScrollArea::vertical()
+                        .max_height((ctx.content_rect().height() - 220.).max(80.))
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::Label::new(self.error.as_deref().unwrap_or_default()).wrap(),
+                            );
+                        });
                     ui.add_space(24.);
                     ui.horizontal(|ui| {
                         dismiss = ui.button("Return to app").clicked();
@@ -1641,44 +1704,5 @@ impl eframe::App for App {
     }
 }
 fn style(ctx: &egui::Context) {
-    let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
-    style.visuals = egui::Visuals::dark();
-    style.visuals.panel_fill = chrome::SIDEBAR;
-    style.visuals.window_fill = chrome::CHROME;
-    style.visuals.extreme_bg_color = chrome::CANVAS;
-    style.visuals.override_text_color = Some(chrome::FG);
-    style.visuals.selection.bg_fill = chrome::SELECTED;
-    style.visuals.window_stroke = egui::Stroke::new(1., chrome::LINE);
-    style.visuals.window_corner_radius = egui::CornerRadius::same(6);
-    style.visuals.window_shadow = Default::default();
-    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(33, 35, 40);
-    style.visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(33, 35, 40);
-    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1., Color32::from_rgb(64, 67, 76));
-    style.visuals.widgets.hovered.bg_fill = chrome::HOVER;
-    style.visuals.widgets.hovered.weak_bg_fill = chrome::HOVER;
-    for visual in [
-        &mut style.visuals.widgets.inactive,
-        &mut style.visuals.widgets.hovered,
-        &mut style.visuals.widgets.active,
-        &mut style.visuals.widgets.noninteractive,
-    ] {
-        visual.corner_radius = egui::CornerRadius::same(4);
-    }
-    style
-        .text_styles
-        .insert(egui::TextStyle::Body, egui::FontId::proportional(14.));
-    style
-        .text_styles
-        .insert(egui::TextStyle::Button, egui::FontId::proportional(14.));
-    style
-        .text_styles
-        .insert(egui::TextStyle::Small, egui::FontId::proportional(12.));
-    style
-        .text_styles
-        .insert(egui::TextStyle::Heading, egui::FontId::proportional(20.));
-    style.spacing.interact_size = egui::vec2(32., 32.);
-    style.spacing.item_spacing = egui::vec2(8., 8.);
-    style.spacing.button_padding = egui::vec2(12., 7.);
-    style.spacing.window_margin = egui::Margin::same(20);
-    ctx.set_style_of(egui::Theme::Dark, style);
+    crate::surfaces::apply(ctx);
 }
