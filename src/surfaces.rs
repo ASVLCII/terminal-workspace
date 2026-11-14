@@ -1,6 +1,6 @@
 //! Shared glass surfaces and accent colors.
 use eframe::egui::{self, Color32};
-use terminal_workspace::model::Accent;
+use terminal_workspace::model::{Accent, Appearance};
 
 pub const CONTROL_RADIUS: egui::CornerRadius = egui::CornerRadius::same(6);
 pub const FIELD_RADIUS: egui::CornerRadius = egui::CornerRadius::same(8);
@@ -22,6 +22,27 @@ pub const CANVAS: Color32 = Color32::from_rgba_premultiplied(4, 9, 17, 96);
 pub const SELECTED: Color32 = Color32::from_rgba_premultiplied(36, 52, 69, 185);
 pub const HOVER: Color32 = Color32::from_rgba_premultiplied(26, 41, 57, 162);
 pub const FG: Color32 = Color32::from_rgb(240, 240, 240);
+
+fn is_opaque(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<Appearance>(egui::Id::new("appearance-mode")))
+        == Some(Appearance::Opaque)
+}
+
+pub fn selected(ctx: &egui::Context) -> Color32 {
+    if is_opaque(ctx) {
+        Color32::from_gray(50)
+    } else {
+        SELECTED
+    }
+}
+
+pub fn hover(ctx: &egui::Context) -> Color32 {
+    if is_opaque(ctx) {
+        Color32::from_gray(38)
+    } else {
+        HOVER
+    }
+}
 
 pub fn accent_ink(accent: Accent) -> Color32 {
     match accent {
@@ -53,7 +74,7 @@ pub fn primary_sized(label: &str, min_size: egui::Vec2) -> impl egui::Widget + '
 }
 
 pub fn button_glint(ui: &egui::Ui, rect: egui::Rect, strength: f32) {
-    if rect.width() > 8. && rect.height() > 6. {
+    if !is_opaque(ui.ctx()) && rect.width() > 8. && rect.height() > 6. {
         paint_sheen(
             ui.painter(),
             rect.shrink2(egui::vec2(4., 2.)),
@@ -88,6 +109,10 @@ fn paint_sheen(painter: &egui::Painter, rect: egui::Rect, color: Color32, opacit
 }
 
 pub fn window_glass(painter: &egui::Painter, rect: egui::Rect) {
+    if is_opaque(painter.ctx()) {
+        painter.rect_filled(rect, 0., Color32::from_rgb(18, 18, 19));
+        return;
+    }
     painter.rect_filled(rect, 0., CANVAS);
     glass_edge(painter, rect, 0.92);
     painter.rect_stroke(
@@ -100,6 +125,14 @@ pub fn window_glass(painter: &egui::Painter, rect: egui::Rect) {
 
 pub fn glass_edge(painter: &egui::Painter, rect: egui::Rect, intensity: f32) {
     if rect.width() < 8. || rect.height() < 4. {
+        return;
+    }
+    if is_opaque(painter.ctx()) {
+        painter.hline(
+            rect.x_range(),
+            rect.bottom() - 0.5,
+            egui::Stroke::new(1., Color32::from_gray(55)),
+        );
         return;
     }
     let rect = rect.shrink(1.);
@@ -117,14 +150,20 @@ pub fn glass_edge(painter: &egui::Painter, rect: egui::Rect, intensity: f32) {
     sheen(painter, rect.shrink2(egui::vec2(3., 0.)), intensity);
 }
 
-pub fn glass_inset() -> egui::Frame {
+pub fn glass_inset(ctx: &egui::Context) -> egui::Frame {
+    let (fill, edge) = if is_opaque(ctx) {
+        (Color32::from_rgb(29, 29, 30), Color32::from_gray(65))
+    } else {
+        (CONTROL, CONTROL_EDGE)
+    };
     egui::Frame::new()
-        .fill(CONTROL)
-        .stroke(egui::Stroke::new(1., CONTROL_EDGE))
+        .fill(fill)
+        .stroke(egui::Stroke::new(1., edge))
         .corner_radius(FIELD_RADIUS)
 }
 
-pub fn apply(ctx: &egui::Context, accent: Accent) {
+pub fn apply(ctx: &egui::Context, accent: Accent, appearance: Appearance) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new("appearance-mode"), appearance));
     let ink = accent_ink(accent);
     let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
     style.visuals = egui::Visuals::dark();
@@ -188,6 +227,14 @@ pub fn apply(ctx: &egui::Context, accent: Accent) {
     style
         .text_styles
         .insert(egui::TextStyle::Heading, egui::FontId::proportional(20.));
+    if appearance == Appearance::Opaque {
+        style.visuals.window_fill = Color32::from_rgb(27, 27, 28);
+        style.visuals.extreme_bg_color = Color32::from_rgb(20, 20, 21);
+        style.visuals.selection.bg_fill = Color32::from_gray(55);
+        style.visuals.window_stroke = egui::Stroke::new(1., Color32::from_gray(65));
+        style.visuals.window_shadow = egui::epaint::Shadow::NONE;
+        style.visuals.popup_shadow = egui::epaint::Shadow::NONE;
+    }
     style.spacing.interact_size = egui::vec2(32., 32.);
     style.spacing.item_spacing = egui::vec2(8., 8.);
     style.spacing.button_padding = egui::vec2(12., 7.);

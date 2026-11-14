@@ -42,6 +42,38 @@ impl App {
                     ui.add_space(8.);
                     setting_row(
                         ui,
+                        "Appearance",
+                        "Choose a glossy glass or solid neutral workspace.",
+                        |ui| {
+                            let before = self.saved.settings.appearance;
+                            egui::ComboBox::from_id_salt("appearance-mode")
+                                .width(ui.available_width())
+                                .selected_text(format!("{before:?}"))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut self.saved.settings.appearance,
+                                        Appearance::Glossy,
+                                        "Glossy",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.saved.settings.appearance,
+                                        Appearance::Opaque,
+                                        "Opaque",
+                                    );
+                                });
+                            if before != self.saved.settings.appearance {
+                                crate::surfaces::apply(
+                                    ui.ctx(),
+                                    self.saved.settings.accent,
+                                    self.saved.settings.appearance,
+                                );
+                                self.changed();
+                            }
+                        },
+                    );
+                    ui.add_space(16.);
+                    setting_row(
+                        ui,
                         "Accent color",
                         "Colors links, status indicators, and focus outlines.",
                         |ui| {
@@ -61,7 +93,11 @@ impl App {
                                     }
                                 });
                             if before != self.saved.settings.accent {
-                                crate::surfaces::apply(ui.ctx(), self.saved.settings.accent);
+                                crate::surfaces::apply(
+                                    ui.ctx(),
+                                    self.saved.settings.accent,
+                                    self.saved.settings.appearance,
+                                );
                                 self.changed();
                             }
                         },
@@ -71,7 +107,7 @@ impl App {
                     ui.add_space(24.);
                     ui.label(RichText::new("TERMINAL").size(12.).color(MUTED));
                     ui.add_space(12.);
-                    let sample = surfaces::glass_inset()
+                    let sample = surfaces::glass_inset(ui.ctx())
                         .inner_margin(Margin::symmetric(20, 16))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());

@@ -144,8 +144,17 @@ pub enum Accent {
     Black,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Appearance {
+    #[default]
+    Glossy,
+    Opaque,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
+    #[serde(default)]
+    pub appearance: Appearance,
     #[serde(default)]
     pub accent: Accent,
     #[serde(default)]
@@ -159,6 +168,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            appearance: Appearance::default(),
             accent: Accent::default(),
             expanded: false,
             font_size: 14.,
@@ -188,6 +198,19 @@ mod font_settings_tests {
         let restored: Settings =
             serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
         assert_eq!(restored.font_family, "Consolas");
+    }
+
+    #[test]
+    fn appearance_defaults_to_glossy_and_roundtrips_opaque() {
+        let old: Settings =
+            serde_json::from_str(r#"{"font_size":14.0,"scrollback":10000,"closing":"Ask"}"#)
+                .unwrap();
+        assert_eq!(old.appearance, Appearance::Glossy);
+        let mut changed = old;
+        changed.appearance = Appearance::Opaque;
+        let restored: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert_eq!(restored.appearance, Appearance::Opaque);
     }
 
     #[test]

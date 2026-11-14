@@ -146,7 +146,11 @@ impl App {
                 )),
             ),
         };
-        crate::surfaces::apply(&cc.egui_ctx, saved.settings.accent);
+        crate::surfaces::apply(
+            &cc.egui_ctx,
+            saved.settings.accent,
+            saved.settings.appearance,
+        );
         cc.egui_ctx.set_theme(egui::Theme::Dark);
         let font_loader =
             crate::fonts::Loader::start(cc.egui_ctx.clone(), saved.settings.font_family.clone());
@@ -1113,7 +1117,11 @@ impl App {
                     let view = egui_term::TerminalView::new(ui, &mut terminal.backend)
                         .set_focus(focused)
                         .set_size(size)
-                        .set_background(Color32::TRANSPARENT)
+                        .set_background(if self.saved.settings.appearance == Appearance::Opaque {
+                            Color32::from_rgb(21, 21, 22)
+                        } else {
+                            Color32::TRANSPARENT
+                        })
                         .set_font(egui_term::TerminalFont::new(egui_term::FontSettings {
                             font_type: egui::FontId::monospace(self.saved.settings.font_size),
                         }));
@@ -1608,7 +1616,7 @@ impl eframe::App for App {
                     }
                     dock_style.tab.active.bg_fill = crate::surfaces::CHROME;
                     dock_style.tab.focused.bg_fill = Color32::TRANSPARENT;
-                    dock_style.tab.hovered.bg_fill = crate::surfaces::HOVER;
+                    dock_style.tab.hovered.bg_fill = crate::surfaces::hover(ui.ctx());
                     dock_style.separator.width = 1.;
                     dock_style.separator.extra = 220.;
                     dock_style.separator.color_idle = crate::surfaces::LINE;

@@ -1,6 +1,6 @@
 use super::*;
 use crate::icons::{self, Icon};
-use crate::surfaces::{CHROME, FG, HOVER, LINE, MUTED, SELECTED, SIDEBAR};
+use crate::surfaces::{CHROME, FG, LINE, MUTED, SIDEBAR};
 use crate::surfaces::{FIELD_RADIUS, accent_ink, glass_edge, primary};
 use egui::{Align, FontId, Frame, Layout, Margin, Sense, Stroke};
 
@@ -11,7 +11,7 @@ fn form_input(text: &mut String) -> egui::TextEdit<'_> {
 }
 
 fn search_input(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::Response {
-    crate::surfaces::glass_inset()
+    crate::surfaces::glass_inset(ui.ctx())
         .inner_margin(Margin::symmetric(12, 0))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -192,7 +192,11 @@ impl App {
                                             ui.painter().rect_filled(
                                                 rect,
                                                 FIELD_RADIUS,
-                                                if selected { SELECTED } else { HOVER },
+                                                if selected {
+                                                    crate::surfaces::selected(ui.ctx())
+                                                } else {
+                                                    crate::surfaces::hover(ui.ctx())
+                                                },
                                             );
                                         }
                                         navigation_focus(ui, rect, &response);
@@ -628,7 +632,8 @@ impl App {
                         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Settings")
                     });
                     if response.hovered() {
-                        ui.painter().rect_filled(rect, 0., HOVER);
+                        ui.painter()
+                            .rect_filled(rect, 0., crate::surfaces::hover(ui.ctx()));
                     }
                     navigation_focus(ui, rect, &response);
                     icons::paint(
@@ -754,7 +759,11 @@ impl App {
                                         Sense::click(),
                                     );
                                     if response.hovered() {
-                                        ui.painter().rect_filled(rect, FIELD_RADIUS, HOVER);
+                                        ui.painter().rect_filled(
+                                            rect,
+                                            FIELD_RADIUS,
+                                            crate::surfaces::hover(ui.ctx()),
+                                        );
                                     }
                                     navigation_focus(ui, rect, &response);
                                     icons::paint(
@@ -803,7 +812,11 @@ impl App {
                                                     ui.painter().rect_filled(
                                                         rect,
                                                         FIELD_RADIUS,
-                                                        if active { SELECTED } else { HOVER },
+                                                        if active {
+                                                            crate::surfaces::selected(ui.ctx())
+                                                        } else {
+                                                            crate::surfaces::hover(ui.ctx())
+                                                        },
                                                     );
                                                 }
                                                 navigation_focus(ui, rect, &response);
@@ -862,9 +875,13 @@ impl App {
                                                                     rect,
                                                                     FIELD_RADIUS,
                                                                     if chosen {
-                                                                        SELECTED
+                                                                        crate::surfaces::selected(
+                                                                            ui.ctx(),
+                                                                        )
                                                                     } else {
-                                                                        HOVER
+                                                                        crate::surfaces::hover(
+                                                                            ui.ctx(),
+                                                                        )
                                                                     },
                                                                 );
                                                             }
@@ -1217,7 +1234,7 @@ impl App {
             .inner_margin(Margin::symmetric(12, 8))
             .show(ui, |ui| {
                 if !files.is_empty() {
-                    let staged = crate::surfaces::glass_inset()
+                    let staged = crate::surfaces::glass_inset(ui.ctx())
                         .inner_margin(12)
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
