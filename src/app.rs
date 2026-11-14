@@ -1,5 +1,7 @@
 mod chrome;
 mod settings;
+#[cfg(windows)]
+mod title_bar;
 use eframe::egui::{self, Color32, RichText};
 use egui_dock::{DockArea, DockState, TabViewer};
 use std::{
@@ -22,6 +24,7 @@ enum Action {
     Focus(Pane),
     Launch(String),
     Layout(Preset),
+    WorkspaceView(bool),
     Maximize(Pane),
     Close(Pane),
     Attach(String, Vec<PathBuf>),
@@ -65,6 +68,7 @@ struct History {
     changed: Option<Instant>,
 }
 pub struct App {
+    glass: bool,
     saved: Saved,
     writer: Writer,
     runtime: Manager,
@@ -125,7 +129,6 @@ impl App {
         cc: &eframe::CreationContext<'_>,
         instance: terminal_workspace::instance::Instance,
     ) -> anyhow::Result<Self> {
-        style(&cc.egui_ctx);
         let store = Store::user()?;
         let (saved, load_error, error) = match store.load() {
             Ok((s, recovered)) => (
@@ -143,6 +146,8 @@ impl App {
                 )),
             ),
         };
+        crate::surfaces::apply(&cc.egui_ctx, saved.settings.accent);
+        cc.egui_ctx.set_theme(egui::Theme::Dark);
         let font_loader =
             crate::fonts::Loader::start(cc.egui_ctx.clone(), saved.settings.font_family.clone());
         let writer = Writer::start(store.directory, cc.egui_ctx.clone());
@@ -161,6 +166,7 @@ impl App {
             Err(_) => None,
         };
         let mut app = Self {
+            glass: crate::backdrop::enable(cc),
             saved,
             writer,
             runtime,
@@ -414,24 +420,10 @@ impl App {
                         if ui
                             .add_sized(
                                 [if self.explicit_quit { 226. } else { 132. }, 34.],
-                                egui::Button::new(
-                                    RichText::new(if self.explicit_quit {
-                                        "Stop terminals and quit"
-                                    } else {
-                                        "Stop and close"
-                                    })
-                                    .color(
-                                        if self.explicit_quit {
-                                            Color32::WHITE
-                                        } else {
-                                            Color32::from_gray(23)
-                                        },
-                                    ),
-                                )
-                                .fill(if self.explicit_quit {
-                                    Color32::from_rgb(170, 55, 64)
+                                crate::surfaces::primary(if self.explicit_quit {
+                                    "Stop terminals and quit"
                                 } else {
-                                    Color32::from_gray(240)
+                                    "Stop and close"
                                 }),
                             )
                             .clicked()
@@ -536,6 +528,9 @@ impl App {
             };
             w.terminals.push(def.clone());
             w.dock.push_to_focused_leaf(Pane::Terminal(id.clone()));
+            if w.terminals.len() == 2 {
+                w.dock = layout::workspace_view(w, self.saved.settings.expanded);
+            }
             self.starting.insert(id.clone());
             self.focus_request = Some(id.clone());
             self.focus = Some(id);
@@ -581,6 +576,18 @@ impl App {
                 let _ = dock.set_active_tab(path);
             } else {
                 dock.push_to_focused_leaf(pane.clone());
+                if matches!(pane, Pane::Image(_)) {
+                    self.saved.workspaces[i].dock = layout::workspace_view(
+                        &self.saved.workspaces[i],
+                        self.saved.settings.expanded,
+                    );
+                    let dock = &mut self.saved.workspaces[i].dock;
+                    if self.saved.settings.expanded
+                        && let Some(tab) = dock.find_tab(&pane)
+                    {
+                        let _ = dock.set_active_tab(tab);
+                    }
+                }
             }
             if let Pane::Terminal(id) = pane {
                 self.focus_request = Some(id.clone());
@@ -872,6 +879,27 @@ impl App {
                         self.changed();
                     }
                 }
+                Action::WorkspaceView(expanded) => {
+                    if self.saved.settings.expanded != expanded {
+                        self.saved.settings.expanded = expanded;
+                        if let Some(i) = self.index() {
+                            let workspace = &mut self.saved.workspaces[i];
+                            workspace.dock = layout::workspace_view(workspace, expanded);
+                            if let Some(tab) = self
+                                .focus
+                                .as_ref()
+                                .and_then(|id| workspace.dock.find_tab(&Pane::Terminal(id.clone())))
+                            {
+                                let _ = workspace.dock.set_active_tab(tab);
+                            }
+                            self.focus_request = self.focus.clone();
+                            self.maximized = None;
+                            self.drag_snapshot = None;
+                            self.dock_epoch += 1;
+                        }
+                        self.changed();
+                    }
+                }
                 Action::Maximize(pane) => {
                     if let Pane::Terminal(id) = &pane {
                         self.focus_request = Some(id.clone());
@@ -982,6 +1010,9 @@ impl App {
         };
         w.terminals.push(def.clone());
         w.dock.push_to_focused_leaf(Pane::Terminal(id.clone()));
+        if w.terminals.len() == 2 {
+            w.dock = layout::workspace_view(w, self.saved.settings.expanded);
+        }
         self.starting.insert(id.clone());
         self.focus_request = Some(id.clone());
         self.focus = Some(id);
@@ -1082,6 +1113,7 @@ impl App {
                     let view = egui_term::TerminalView::new(ui, &mut terminal.backend)
                         .set_focus(focused)
                         .set_size(size)
+                        .set_background(Color32::TRANSPARENT)
                         .set_font(egui_term::TerminalFont::new(egui_term::FontSettings {
                             font_type: egui::FontId::monospace(self.saved.settings.font_size),
                         }));
@@ -1227,6 +1259,14 @@ impl TabViewer for Viewer<'_> {
     }
 }
 impl eframe::App for App {
+    fn clear_color(&self, _: &egui::Visuals) -> [f32; 4] {
+        if self.glass {
+            [0.; 4]
+        } else {
+            [0.015, 0.025, 0.045, 1.]
+        }
+    }
+
     fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         let ctx = context.clone();
         while let Some(event) = self.font_loader.poll() {
@@ -1467,6 +1507,7 @@ impl eframe::App for App {
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        crate::surfaces::window_glass(ui.painter(), ui.max_rect());
         let exiting = self.pending_stop_save
             || self.saved_action == Some(terminal_workspace::closing::Choice::Stop)
             || self.shutdown_waiting
@@ -1475,6 +1516,8 @@ impl eframe::App for App {
         if exiting {
             ui.disable();
         }
+        #[cfg(windows)]
+        title_bar::show(ui);
         if ctx.input(|i| i.viewport().close_requested()) && !self.closing {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             if self.saved_action.is_none()
@@ -1518,7 +1561,7 @@ impl eframe::App for App {
         }
         self.workspace_chrome(ui);
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(crate::surfaces::CANVAS))
+            .frame(egui::Frame::NONE)
             .show(ui, |ui| {
                 if let Some(pane) = self.global_pane.clone() {
                     self.maximized_header(ui, &pane);
@@ -1551,8 +1594,8 @@ impl eframe::App for App {
                     dock_style.tab.minimum_width = Some(140.);
                     dock_style.tab_bar.bg_fill = crate::surfaces::CHROME;
                     dock_style.tab.tab_body.inner_margin = egui::Margin::ZERO;
-                    dock_style.tab.tab_body.stroke = egui::Stroke::NONE;
-                    dock_style.tab.tab_body.bg_fill = crate::surfaces::CANVAS;
+                    dock_style.tab.tab_body.stroke = egui::Stroke::new(1., crate::surfaces::LINE);
+                    dock_style.tab.tab_body.bg_fill = Color32::TRANSPARENT;
                     for interaction in [
                         &mut dock_style.tab.active,
                         &mut dock_style.tab.inactive,
@@ -1564,7 +1607,7 @@ impl eframe::App for App {
                         interaction.bg_fill = crate::surfaces::CHROME;
                     }
                     dock_style.tab.active.bg_fill = crate::surfaces::CHROME;
-                    dock_style.tab.focused.bg_fill = crate::surfaces::CONTROL;
+                    dock_style.tab.focused.bg_fill = Color32::TRANSPARENT;
                     dock_style.tab.hovered.bg_fill = crate::surfaces::HOVER;
                     dock_style.separator.width = 1.;
                     dock_style.separator.extra = 220.;
@@ -1611,7 +1654,7 @@ impl eframe::App for App {
                         ui.add_space(8.);
                         ui.weak("Choose a project folder and open your first terminal.");
                         ui.add_space(20.);
-                        if ui.button("New workspace").clicked() {
+                        if ui.add(crate::surfaces::primary("New workspace")).clicked() {
                             self.actions.push(Action::NewWorkspace);
                         }
                     });
@@ -1702,7 +1745,4 @@ impl eframe::App for App {
             .collect();
         self.images.retain(|p, _| live_images.contains(p));
     }
-}
-fn style(ctx: &egui::Context) {
-    crate::surfaces::apply(ctx);
 }

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod app;
+mod backdrop;
 mod fonts;
 mod foundation;
 mod icons;
@@ -17,6 +18,14 @@ fn main() -> eframe::Result {
     if std::env::var_os("WGPU_BACKEND").is_none() {
         setup.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
     }
+    #[cfg(windows)]
+    {
+        setup
+            .instance_descriptor
+            .backend_options
+            .dx12
+            .presentation_system = eframe::wgpu::Dx12SwapchainKind::DxgiFromVisual;
+    }
     setup.power_preference = eframe::wgpu::PowerPreference::LowPower;
     let descriptor = setup.device_descriptor.clone();
     setup.device_descriptor = std::sync::Arc::new(move |adapter| {
@@ -31,6 +40,8 @@ fn main() -> eframe::Result {
         },
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("Terminal Workspace")
+            .with_decorations(!cfg!(windows))
+            .with_transparent(cfg!(windows))
             .with_inner_size(if std::env::args().any(|a| a == "--benchmark-workload") {
                 [1600., 950.]
             } else {

@@ -1008,8 +1008,6 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.36.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98466000559d66ba4db786a30448b01483946add4188e7f10f522a27b4fb89cc"
 dependencies = [
  "accesskit_winit",
  "arboard",
@@ -1023,6 +1021,7 @@ dependencies = [
  "raw-window-handle",
  "smithay-clipboard",
  "web-time",
+ "wgpu-types",
  "winit",
 ]
 
@@ -3848,6 +3847,7 @@ dependencies = [
  "egui_term",
  "fontdb",
  "image",
+ "raw-window-handle",
  "reqwest",
  "rfd",
  "serde",

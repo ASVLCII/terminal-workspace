@@ -1,5 +1,5 @@
 use super::*;
-use crate::surfaces::{CANVAS, FG, FIELD_RADIUS, LINE, MUTED};
+use crate::surfaces::{self, CANVAS, FG, LINE, MUTED};
 use egui::{Align, FontId, Frame, Layout, Margin, Stroke};
 
 // Settings share one content edge. On narrow windows, controls stack instead of
@@ -38,14 +38,40 @@ impl App {
                 .inner_margin(Margin::symmetric(margin, 32))
                 .show(ui, |ui| {
                     ui.set_max_width(ui.available_width().min(920.));
-                    ui.label(RichText::new("Settings").size(30.).strong());
-                    ui.label(RichText::new("Make this workspace yours.").color(MUTED));
-                    ui.add_space(32.);
+                    ui.label(RichText::new("Theme").size(18.).strong());
+                    ui.add_space(8.);
+                    setting_row(
+                        ui,
+                        "Accent color",
+                        "Colors links, status indicators, and focus outlines.",
+                        |ui| {
+                            let before = self.saved.settings.accent;
+                            egui::ComboBox::from_id_salt("theme-accent")
+                                .width(ui.available_width())
+                                .selected_text(format!("{before:?}"))
+                                .show_ui(ui, |ui| {
+                                    for accent in
+                                        [Accent::Cyan, Accent::Blue, Accent::White, Accent::Black]
+                                    {
+                                        ui.selectable_value(
+                                            &mut self.saved.settings.accent,
+                                            accent,
+                                            format!("{accent:?}"),
+                                        );
+                                    }
+                                });
+                            if before != self.saved.settings.accent {
+                                crate::surfaces::apply(ui.ctx(), self.saved.settings.accent);
+                                self.changed();
+                            }
+                        },
+                    );
+                    ui.add_space(28.);
+                    ui.separator();
+                    ui.add_space(24.);
                     ui.label(RichText::new("TERMINAL").size(12.).color(MUTED));
                     ui.add_space(12.);
-                    Frame::new()
-                        .fill(crate::surfaces::CONTROL)
-                        .corner_radius(FIELD_RADIUS)
+                    let sample = surfaces::glass_inset()
                         .inner_margin(Margin::symmetric(20, 16))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
@@ -60,6 +86,7 @@ impl App {
                                     .color(MUTED),
                             );
                         });
+                    surfaces::glass_edge(ui.painter(), sample.response.rect.shrink(3.), 0.48);
                     ui.add_space(20.);
                     let width = ui.available_width();
                     let size_width = 106. + 2. * ui.spacing().item_spacing.x;

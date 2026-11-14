@@ -135,8 +135,21 @@ pub enum Closing {
     Stop,
     Background,
 }
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Accent {
+    #[default]
+    Cyan,
+    Blue,
+    White,
+    Black,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
+    #[serde(default)]
+    pub accent: Accent,
+    #[serde(default)]
+    pub expanded: bool,
     #[serde(default = "default_font_family")]
     pub font_family: String,
     pub font_size: f32,
@@ -146,6 +159,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            accent: Accent::default(),
+            expanded: false,
             font_size: 14.,
             font_family: default_font_family(),
             scrollback: 10_000,
@@ -173,6 +188,20 @@ mod font_settings_tests {
         let restored: Settings =
             serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
         assert_eq!(restored.font_family, "Consolas");
+    }
+
+    #[test]
+    fn accent_defaults_for_older_state_and_roundtrips() {
+        let mut settings: Settings =
+            serde_json::from_str(r#"{"font_size":14.0,"scrollback":10000,"closing":"Ask"}"#)
+                .unwrap();
+        assert_eq!(settings.accent, Accent::Cyan);
+        for accent in [Accent::Cyan, Accent::Blue, Accent::White, Accent::Black] {
+            settings.accent = accent;
+            let restored: Settings =
+                serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+            assert_eq!(restored.accent, accent);
+        }
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]

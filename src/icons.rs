@@ -1,4 +1,4 @@
-use crate::surfaces::{CONTROL_RADIUS, HOVER};
+use crate::surfaces::{CONTROL_RADIUS, button_glint};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke};
 #[derive(Clone, Copy)]
 pub enum Icon {
@@ -12,6 +12,10 @@ pub enum Icon {
     Plus,
     Close,
     Maximize,
+    #[cfg(windows)]
+    Minimize,
+    #[cfg(windows)]
+    Restore,
     Paperclip,
     Chevron(bool),
 }
@@ -94,6 +98,19 @@ pub fn paint(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Maximize => {
             p.rect_stroke(r.shrink(2.), 0., s, egui::StrokeKind::Inside);
         }
+        #[cfg(windows)]
+        Icon::Minimize => line((3., 9.), (13., 9.)),
+        #[cfg(windows)]
+        Icon::Restore => {
+            line((6., 2.), (14., 2.));
+            line((14., 2.), (14., 10.));
+            p.rect_stroke(
+                Rect::from_min_max(at(2., 6.), at(11., 14.)),
+                0.,
+                s,
+                egui::StrokeKind::Inside,
+            );
+        }
         Icon::Chevron(open) => {
             if open {
                 line((3., 6.), (8., 11.));
@@ -131,13 +148,14 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     });
     if response.hovered() {
         ui.painter()
-            .rect_filled(response.rect, CONTROL_RADIUS, HOVER);
+            .rect_filled(response.rect, CONTROL_RADIUS, Color32::from_white_alpha(15));
+        button_glint(ui, response.rect, 0.55);
     }
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,
             CONTROL_RADIUS,
-            Stroke::new(1., Color32::from_gray(180)),
+            ui.visuals().selection.stroke,
             egui::StrokeKind::Inside,
         );
     }

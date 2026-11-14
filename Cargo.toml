@@ -16,6 +16,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 url = "2"
 tiny_http = "0.12"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json"] }
+raw-window-handle = "0.6"
 rfd = "0.17"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 arboard = "3"
@@ -25,7 +26,7 @@ crossbeam-channel = "0.5"
 fontdb = { version = "0.24", default-features = false, features = ["fs", "memmap"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_Security", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_Security", "Win32_Storage_FileSystem"] }
 
 [profile.release]
 lto = "thin"
@@ -37,3 +38,4 @@ exclude = ["vendor/alacritty_terminal"]
 
 [patch.crates-io]
 alacritty_terminal = { path = "vendor/alacritty_terminal" }
+egui-winit = { path = "vendor/egui-winit" }

@@ -1,8 +1,34 @@
 use super::*;
 use crate::icons::{self, Icon};
-use crate::surfaces::{CANVAS, CHROME, FG, HOVER, LINE, MUTED, SELECTED, SIDEBAR};
-use crate::surfaces::{CONTROL_RADIUS, FIELD_RADIUS};
+use crate::surfaces::{CHROME, FG, HOVER, LINE, MUTED, SELECTED, SIDEBAR};
+use crate::surfaces::{FIELD_RADIUS, accent_ink, glass_edge, primary};
 use egui::{Align, FontId, Frame, Layout, Margin, Sense, Stroke};
+
+fn form_input(text: &mut String) -> egui::TextEdit<'_> {
+    egui::TextEdit::singleline(text)
+        .margin(Margin::symmetric(12, 6))
+        .vertical_align(Align::Center)
+}
+
+fn search_input(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::Response {
+    crate::surfaces::glass_inset()
+        .inner_margin(Margin::symmetric(12, 0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                icons::inline(ui, Icon::Search, MUTED);
+                ui.add_sized(
+                    [ui.available_width(), 36.],
+                    egui::TextEdit::singleline(text)
+                        .hint_text(hint)
+                        .frame(Frame::NONE)
+                        .vertical_align(Align::Center),
+                )
+            })
+            .inner
+        })
+        .inner
+}
+
 fn flat(ui: &mut egui::Ui) {
     ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
@@ -13,7 +39,7 @@ fn navigation_focus(ui: &egui::Ui, rect: egui::Rect, response: &egui::Response) 
         ui.painter().rect_stroke(
             rect,
             FIELD_RADIUS,
-            Stroke::new(1., Color32::from_gray(180)),
+            ui.visuals().selection.stroke,
             egui::StrokeKind::Inside,
         );
     }
@@ -34,11 +60,6 @@ fn navigation_title(ui: &mut egui::Ui, rect: egui::Rect, text: &str) {
         galley,
         FG,
     );
-}
-fn primary(label: &str) -> egui::Button<'_> {
-    egui::Button::new(RichText::new(label).color(Color32::from_gray(23)))
-        .fill(Color32::from_gray(240))
-        .stroke(Stroke::new(1., Color32::from_gray(249)))
 }
 impl App {
     pub(super) fn history_surface(&mut self, ui: &mut egui::Ui) {
@@ -112,27 +133,9 @@ impl App {
                             });
                         }
                         ui.add_space(12.);
-                        Frame::new()
-                            .fill(crate::surfaces::CONTROL)
-                            .stroke(Stroke::new(1., LINE))
-                            .corner_radius(FIELD_RADIUS)
-                            .inner_margin(Margin::symmetric(12, 6))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    icons::inline(ui, Icon::Search, MUTED);
-                                    if ui
-                                        .add_sized(
-                                            [ui.available_width(), 26.],
-                                            egui::TextEdit::singleline(&mut self.history.search)
-                                                .hint_text("Search chats")
-                                                .frame(Frame::NONE),
-                                        )
-                                        .changed()
-                                    {
-                                        self.history.changed = Some(Instant::now());
-                                    }
-                                });
-                            });
+                        if search_input(ui, &mut self.history.search, "Search chats").changed() {
+                            self.history.changed = Some(Instant::now());
+                        }
                         ui.add_space(18.);
                         let (heading_rect, _) = ui.allocate_exact_size(
                             egui::vec2(ui.available_width(), 24.),
@@ -395,7 +398,7 @@ impl App {
                             ui.add_space(4.);
                             ui.add_sized(
                                 [ui.available_width(), 36.],
-                                egui::TextEdit::singleline(&mut form.name).hint_text("Daily work"),
+                                form_input(&mut form.name).hint_text("Daily work"),
                             );
                             ui.add_space(16.);
                         } else {
@@ -403,7 +406,7 @@ impl App {
                             ui.add_space(4.);
                             ui.add_sized(
                                 [ui.available_width(), 36.],
-                                egui::TextEdit::singleline(&mut form.command)
+                                form_input(&mut form.command)
                                     .font(egui::TextStyle::Monospace)
                                     .hint_text("npm run dev"),
                             );
@@ -421,7 +424,7 @@ impl App {
                         ui.horizontal(|ui| {
                             ui.add_sized(
                                 [(ui.available_width() - 102.).max(80.), 36.],
-                                egui::TextEdit::singleline(&mut form.folder),
+                                form_input(&mut form.folder),
                             );
                             browse = ui
                                 .add_sized([94., 36.], egui::Button::new("Browse…"))
@@ -462,7 +465,7 @@ impl App {
                                 ui.add_space(4.);
                                 ui.add_sized(
                                     [ui.available_width(), 36.],
-                                    egui::TextEdit::singleline(&mut form.command),
+                                    form_input(&mut form.command).font(egui::TextStyle::Monospace),
                                 );
                             }
                         }
@@ -478,12 +481,14 @@ impl App {
                             create = ui
                                 .add_enabled(
                                     !form.validating,
-                                    primary(if form.custom {
-                                        "Open terminal"
-                                    } else {
-                                        "Create workspace"
-                                    })
-                                    .min_size(egui::vec2(148., 34.)),
+                                    crate::surfaces::primary_sized(
+                                        if form.custom {
+                                            "Open terminal"
+                                        } else {
+                                            "Create workspace"
+                                        },
+                                        egui::vec2(148., 34.),
+                                    ),
                                 )
                                 .clicked();
                             cancel |= ui
@@ -539,6 +544,7 @@ impl App {
             Pane::History => Icon::Chat,
         };
         let r = response.rect;
+        glass_edge(&painter, r, 0.68);
         icons::paint(
             &painter,
             egui::Rect::from_center_size(
@@ -554,7 +560,7 @@ impl App {
                 let status = self.status(id);
                 let short = status.split('·').next().unwrap_or(&status).trim();
                 let color = if short == "Running" {
-                    Color32::from_rgb(24, 190, 151)
+                    accent_ink(self.saved.settings.accent)
                 } else if short.starts_with("Failed") {
                     Color32::from_rgb(229, 91, 110)
                 } else {
@@ -592,7 +598,12 @@ impl App {
             galley,
             FG,
         );
-        painter.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1., LINE));
+        let edge = if matches!(pane, Pane::Terminal(id) if self.focus.as_ref() == Some(id)) {
+            accent_ink(self.saved.settings.accent)
+        } else {
+            LINE
+        };
+        painter.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1., edge));
         if response.double_clicked() {
             self.actions.push(Action::Maximize(pane.clone()));
         } else if response.clicked() {
@@ -600,6 +611,11 @@ impl App {
         }
     }
     pub(super) fn workspace_chrome(&mut self, ui: &mut egui::Ui) {
+        if !self.saved.settings.expanded {
+            self.workspace_rail(ui);
+            self.workspace_toolbar(ui);
+            return;
+        }
         egui::Panel::bottom("footer")
             .exact_size(36.)
             .frame(Frame::NONE.fill(CHROME).stroke(Stroke::new(1., LINE)))
@@ -612,7 +628,7 @@ impl App {
                         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Settings")
                     });
                     if response.hovered() {
-                        ui.painter().rect_filled(rect, 0., Color32::from_gray(39));
+                        ui.painter().rect_filled(rect, 0., HOVER);
                     }
                     navigation_focus(ui, rect, &response);
                     icons::paint(
@@ -662,31 +678,19 @@ impl App {
                 });
             });
         let sidebar = egui::Panel::left("sidebar")
-            .default_size(272.)
+            .default_size(220.)
             .size_range(220.0..=380.0)
             .frame(Frame::NONE.fill(SIDEBAR).stroke(Stroke::new(1., LINE)))
             .show(ui, |ui| {
+                glass_edge(ui.painter(), ui.max_rect(), 0.55);
                 Frame::NONE
                     .inner_margin(Margin::symmetric(12, 12))
                     .show(ui, |ui| {
-                        Frame::new()
-                            .fill(CHROME)
-                            .stroke(Stroke::new(1., LINE))
-                            .corner_radius(FIELD_RADIUS)
-                            .inner_margin(Margin::symmetric(12, 4))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    icons::inline(ui, Icon::Search, MUTED);
-                                    let width = ui.available_width();
-                                    ui.add_sized(
-                                        [width, 22.],
-                                        egui::TextEdit::singleline(&mut self.navigation_search)
-                                            .hint_text("Search workspaces and chats")
-                                            .font(FontId::proportional(13.))
-                                            .frame(Frame::NONE),
-                                    );
-                                });
-                            });
+                        search_input(
+                            ui,
+                            &mut self.navigation_search,
+                            "Search workspaces and chats",
+                        );
                         ui.add_space(10.);
                         ui.scope(|ui| {
                             flat(ui);
@@ -912,7 +916,9 @@ impl App {
                                                             );
                                                             let status = self.status(&terminal.id);
                                                             let color = if status == "Running" {
-                                                                Color32::from_rgb(24, 190, 151)
+                                                                accent_ink(
+                                                                    self.saved.settings.accent,
+                                                                )
                                                             } else if status.starts_with("Failed") {
                                                                 Color32::from_rgb(229, 91, 110)
                                                             } else {
@@ -1011,9 +1017,59 @@ impl App {
                                     .color(MUTED),
                             );
                         }
+                        let response = ui.allocate_response(ui.available_size(), Sense::click());
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                "Return to docked layout",
+                            )
+                        });
+                        if response.clicked() {
+                            self.actions.push(Action::WorkspaceView(false));
+                        }
                     });
             });
         self.sidebar_width = sidebar.response.rect.width();
+        self.workspace_toolbar(ui);
+    }
+
+    fn workspace_rail(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::left("workspace-rail")
+            .exact_size(56.)
+            .resizable(false)
+            .frame(Frame::NONE.fill(SIDEBAR).stroke(Stroke::new(1., LINE)))
+            .show(ui, |ui| {
+                glass_edge(ui.painter(), ui.max_rect(), 0.53);
+                ui.vertical_centered(|ui| {
+                    ui.add_space(8.);
+                    if icons::button(ui, Icon::Folder, "Workspaces").clicked() {
+                        self.actions.push(Action::WorkspaceView(true));
+                    }
+                    if icons::button(ui, Icon::Chat, "Past chats").clicked() {
+                        self.actions.push(Action::Focus(Pane::History));
+                    }
+                    let spare = (ui.available_height() - 45.).max(0.);
+                    let response = ui
+                        .allocate_response(egui::vec2(ui.available_width(), spare), Sense::click());
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            true,
+                            "Expand workspace",
+                        )
+                    });
+                    if response.clicked() {
+                        self.actions.push(Action::WorkspaceView(true));
+                    }
+                    if icons::button(ui, Icon::Settings, "Settings").clicked() {
+                        self.actions.push(Action::Focus(Pane::Settings));
+                    }
+                });
+            });
+    }
+
+    fn workspace_toolbar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("toolbar")
             .exact_size(44.)
             .frame(
@@ -1023,6 +1079,11 @@ impl App {
                     .inner_margin(Margin::symmetric(16, 5)),
             )
             .show(ui, |ui| {
+                glass_edge(
+                    ui.painter(),
+                    ui.max_rect().expand2(egui::vec2(15., 4.)),
+                    0.65,
+                );
                 ui.horizontal(|ui| {
                     if let Some(i) = self.index() {
                         let workspace = &self.saved.workspaces[i];
@@ -1038,13 +1099,13 @@ impl App {
                             color: MUTED,
                             ..Default::default()
                         };
-                        let primary = egui::TextFormat {
-                            font_id: FontId::proportional(13.),
+                        let title_format = egui::TextFormat {
+                            font_id: FontId::proportional(15.),
                             color: FG,
                             ..Default::default()
                         };
-                        job.append(&format!("{} / ", project), 0., muted);
-                        job.append(&workspace.name, 0., primary);
+                        job.append(&workspace.name, 0., title_format);
+                        job.append(&format!("   /   {project}"), 0., muted);
                         let width = (ui.available_width() - 220.).max(0.);
                         ui.allocate_ui_with_layout(
                             egui::vec2(width, 30.),
@@ -1077,15 +1138,12 @@ impl App {
                             );
                             layout_menu.response.on_hover_text("Pane layout");
                             ui.separator();
-                            ui.scope(|ui| {
-                                flat(ui);
-                                ui.menu_button("+  Terminal", |ui| {
-                                    self.terminal_menu(ui);
-                                });
+                            egui::Popup::menu(&ui.add(primary("+  New terminal"))).show(|ui| {
+                                self.terminal_menu(ui);
                             });
                         });
                     } else {
-                        ui.label(RichText::new("Terminal Workspace").size(17.).strong());
+                        ui.add_sized([140., 30.], egui::Label::new("Workspaces"));
                     }
                 });
             });
@@ -1159,13 +1217,12 @@ impl App {
             .inner_margin(Margin::symmetric(12, 8))
             .show(ui, |ui| {
                 if !files.is_empty() {
-                    Frame::new()
-                        .fill(crate::surfaces::CONTROL)
-                        .stroke(Stroke::new(1., Color32::from_gray(64)))
-                        .corner_radius(CONTROL_RADIUS)
+                    let staged = crate::surfaces::glass_inset()
                         .inner_margin(12)
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
+                                let color = accent_ink(self.saved.settings.accent);
+                                ui.label(RichText::new("Staged").size(12.).color(color));
                                 let target = format!("To {}", def.name);
                                 let title_width = (ui.available_width() - 40.).max(0.);
                                 ui.allocate_ui_with_layout(
@@ -1241,6 +1298,7 @@ impl App {
                                     });
                                 });
                         });
+                    glass_edge(ui.painter(), staged.response.rect.shrink(3.), 0.42);
                 }
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 7.;
@@ -1300,7 +1358,7 @@ impl App {
         attachment_menu.response.on_hover_text("Add attachments");
     }
     pub(super) fn maximized_header(&mut self, ui: &mut egui::Ui, pane: &Pane) {
-        Frame::NONE
+        let header = Frame::NONE
             .fill(CHROME)
             .inner_margin(Margin::symmetric(10, 2))
             .show(ui, |ui| {
@@ -1325,7 +1383,12 @@ impl App {
                     ui.allocate_ui_with_layout(
                         egui::vec2(title_width, 30.),
                         Layout::left_to_right(Align::Center),
-                        |ui| ui.add(egui::Label::new(RichText::new(&title).size(13.)).truncate()),
+                        |ui| {
+                            ui.add(
+                                egui::Label::new(RichText::new(&title).size(15.).strong())
+                                    .truncate(),
+                            )
+                        },
                     )
                     .inner
                     .on_hover_text(title);
@@ -1341,6 +1404,7 @@ impl App {
                     });
                 });
             });
+        glass_edge(ui.painter(), header.response.rect, 0.62);
     }
     pub(super) fn image_surface(&mut self, ui: &mut egui::Ui, path: &PathBuf) {
         if !self.images.contains_key(path)

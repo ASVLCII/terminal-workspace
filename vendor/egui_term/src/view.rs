@@ -44,6 +44,7 @@ pub struct TerminalView<'a> {
     backend: &'a mut TerminalBackend,
     font: TerminalFont,
     theme: TerminalTheme,
+    background: Option<egui::Color32>,
     bindings_layout: BindingsLayout,
 }
 
@@ -80,6 +81,7 @@ impl<'a> TerminalView<'a> {
             backend,
             font: TerminalFont::default(),
             theme: TerminalTheme::default(),
+            background: None,
             bindings_layout: BindingsLayout::new(),
         }
     }
@@ -87,6 +89,12 @@ impl<'a> TerminalView<'a> {
     #[inline]
     pub fn set_theme(mut self, theme: TerminalTheme) -> Self {
         self.theme = theme;
+        self
+    }
+
+    /// Overrides the painted surface while retaining ANSI cell colors.
+    pub fn set_background(mut self, background: egui::Color32) -> Self {
+        self.background = Some(background);
         self
     }
 
@@ -241,7 +249,7 @@ impl<'a> TerminalView<'a> {
         let mut shapes = vec![Shape::Rect(RectShape::filled(
             Rect::from_min_max(layout_min, layout_max),
             CornerRadius::ZERO,
-            global_bg,
+            self.background.unwrap_or(global_bg),
         ))];
 
         for indexed in &content.cells {
